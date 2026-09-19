@@ -56,3 +56,49 @@ class Store:
         with self.lock:
             row = self.db.execute("SELECT data FROM incidents WHERE id=?", (incident_id,)).fetchone()
             return json.loads(row[0]) if row else None
+
+
+class ModalStore(Store):
+    """Shared demo state, persisted across container restarts by Modal Dict.
+
+    The deployment runs exactly one writer container. Inactive demo records expire
+    after Modal Dict's retention window; this is not an archival database.
+    """
+    def __init__(self, name, records=None):
+        import modal
+        self.lock = threading.RLock()
+        self.records = records if records is not None else modal.Dict.from_name(name, create_if_missing=True)
+
+    def save_run(self, run):
+        with self.lock:
+            self.records.put('run:'+run['id'], json.dumps(run))
+            latest = self.records.get('meta:latest')
+            if not latest or run['created_at'] > latest['created_at']:
+                self.records.put('meta:latest', {k: run[k] for k in ('id', 'created_at')})
+
+    def get_run(self, run_id):
+        with self.lock:
+            raw = self.records.get('run:'+run_id)
+            return json.loads(raw) if raw else None
+
+    def runs(self, *, limit=30):
+        with self.lock:
+            runs = [json.loads(value) for key, value in self.records.items() if key.startswith('run:')]
+            return sorted(runs, key=lambda r: r['created_at'], reverse=True)[:limit]
+
+    def latest(self):
+        with self.lock:
+            latest = self.records.get('meta:latest')
+            if latest: return self.get_run(latest['id'])
+            # Bootstrap older deployments once, before the indexed live-poll path.
+            runs = self.runs(limit=1)
+            if runs: self.records.put('meta:latest', {k: runs[0][k] for k in ('id', 'created_at')})
+            return runs[0] if runs else None
+
+    def save_incident(self, incident):
+        with self.lock: self.records.put('incident:'+incident['id'], json.dumps(incident))
+
+    def incident(self, incident_id):
+        with self.lock:
+            raw = self.records.get('incident:'+incident_id)
+            return json.loads(raw) if raw else None

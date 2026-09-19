@@ -11,11 +11,12 @@ def main():
     for k, v in dotenv_values(PROJECT/".env").items():
         if v: os.environ.setdefault(k, v)
     parser = argparse.ArgumentParser(description="Handshake carrier API repair lab")
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8780)
     parser.add_argument("--state-dir", type=Path, default=PROJECT/"state")
     args = parser.parse_args()
     logfire.configure(service_name="handshake-repair", send_to_logfire=bool(os.getenv("LOGFIRE_TOKEN")), console=False, inspect_arguments=False)
     logfire.instrument_pydantic_ai()
-    serve(args.port, args.state_dir)
+    serve(args.port, args.state_dir, args.host)
 
 if __name__ == "__main__": main()
