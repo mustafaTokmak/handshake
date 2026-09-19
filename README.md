@@ -4,6 +4,10 @@
 
 **Recorded six-case session:** [3a30b2e9 · 19 Sept 2026, 18:15:17 BST · 6/6 complete](https://mtokmak06--handshake-live.modal.run/?run=3a30b2e9561548ab81d8d2b0e3e4f55a).
 
+**Demo video:** [Watch the Handshake walkthrough on YouTube](https://youtu.be/mm4cmOMjB0g).
+
+[![Handshake demo video preview showing the Gateway carrier-document guardrail](docs/demo-video-preview.jpg)](https://youtu.be/mm4cmOMjB0g)
+
 Five fictional shipping carriers expose a quote API. One morning some of them
 answer in a shape the integration was never written for: Pydantic validation
 fails and those carriers drop out of the quote list. An agent then tries to
