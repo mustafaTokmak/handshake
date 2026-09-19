@@ -33,3 +33,12 @@ dd{margin:0}
 .note.ok{color:var(--accent)}
 .note.bad{color:var(--bad)}
 @media(max-width:620px){h1{font-size:27px}.badge{position:static;display:inline-block;margin-top:10px}}
+
+.queue-panel{margin:0 0 22px;background:var(--card);border:1px solid var(--line);padding:14px 18px}
+.queue-panel h2{margin:0 0 8px;font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);display:flex;gap:12px;align-items:baseline}
+.queue{list-style:none;margin:0;padding:0}
+.queue-row{padding:5px 0;display:flex;gap:10px;flex-wrap:wrap;align-items:baseline}
+.queue-row.current .link{color:var(--accent);font-weight:700}
+.queue-why{font-size:13px;color:var(--muted)}
+.link{background:none;border:0;padding:0;font:inherit;font-size:14px;color:var(--ink);text-decoration:underline;cursor:pointer;min-width:0}
+.link:disabled{cursor:default;opacity:.55;text-decoration:none}

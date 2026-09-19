@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stand-in for repair-lab's contact endpoints, for testing and rehearsal.
 
-repair-lab needs Python 3.12 and uv. This mirrors the three routes the caller
+repair-lab needs Python 3.12 and uv. This mirrors the routes the caller
 touches, with the same record shapes and the same ContactReply constraints, so
 the integration can be exercised on the system Python. It is a test double, not
 a reimplementation: it validates and records, it does not repair anything.
@@ -37,11 +37,13 @@ INCIDENT = {
     },
     "transport": "stub_no_call_placed",
 }
+# Carriers keyed by id, as the lab stores them.
 LATEST = {"id": "run-demo-1", "created_at": "2026-09-19T16:39:00Z", "condition": "baseline",
-          "carriers": [
-              {"carrier_id": "parcelnest", "status": "repaired"},
-              {"carrier_id": "harbor", "status": "waiting_contact", "incident_id": INCIDENT_ID},
-          ]}
+          "carriers": {
+              "parcelnest": {"status": "available", "incident_id": None},
+              "harbor": {"status": "waiting_contact", "incident_id": INCIDENT_ID},
+          }}
+RUNS = [LATEST]
 received = []
 
 
@@ -64,6 +66,8 @@ def serve(port):
             path = urlsplit(self.path).path
             if path == "/api/latest":
                 return self.send_json(200, LATEST)
+            if path == "/api/runs":
+                return self.send_json(200, RUNS)
             if path.startswith("/api/incidents/"):
                 wanted = path.rsplit("/", 1)[-1]
                 if wanted == INCIDENT_ID:

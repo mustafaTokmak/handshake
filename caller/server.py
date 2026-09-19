@@ -14,10 +14,10 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urlsplit, parse_qs
+from urllib.request import urlopen
 
+import lab
 from brief import FIXTURE, from_incident, instruction_for
 from models import FINDING_DECLARATION, CallFinding, to_context
 
@@ -25,49 +25,21 @@ HERE = Path(__file__).resolve().parent
 CALLS = HERE / "calls"
 DEFAULT_MODEL = "gemini-3.8-live"
 KEY_NAMES = ("GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_GENAI_API_KEY", "GOOGLE_API")
-MAX_BODY = 32768
-LAB_URL = os.environ.get("REPAIR_LAB_URL", "http://127.0.0.1:8780").rstrip("/")
-LAB_TIMEOUT = 8
+# Generous: the page posts the finding plus the whole call transcript, and a
+# finding's list entries carry no length limit of their own. to_context() is
+# what guarantees the lab's size contract, so this only has to stop abuse.
+MAX_BODY = 262144
 
 
-def lab_get(path):
-    with urlopen(LAB_URL + path, timeout=LAB_TIMEOUT) as response:
-        return json.loads(response.read().decode())
-
-
-def lab_post(path, payload):
-    body = json.dumps(payload).encode()
-    headers = {"Content-Type": "application/json"}
-    token = os.environ.get("CONTACT_CALLBACK_TOKEN", "").strip()
-    if token:
-        headers["Authorization"] = "Bearer " + token
-    request = Request(LAB_URL + path, data=body, headers=headers, method="POST")
-    with urlopen(request, timeout=LAB_TIMEOUT) as response:
-        return response.status, json.loads(response.read().decode() or "{}")
-
-
-def waiting_incident():
-    """Find an incident the repair lab is blocked on. Their record is another
-    service's output, so nothing about its shape is assumed."""
-    try:
-        latest = lab_get("/api/latest")
-    except (HTTPError, URLError, OSError, ValueError):
-        return None
-    if not isinstance(latest, dict):
-        return None
-    carriers = latest.get("carriers")
-    states = carriers.values() if isinstance(carriers, dict) else carriers if isinstance(carriers, list) else []
-    for state in states:
-        if not isinstance(state, dict):
-            continue
-        if state.get("status") == "waiting_contact" and state.get("incident_id"):
-            try:
-                incident = lab_get("/api/incidents/" + str(state["incident_id"]))
-            except (HTTPError, URLError, OSError, ValueError):
-                return None
-            if isinstance(incident, dict) and incident.get("status") == "waiting":
-                return incident
-    return None
+def pick_incident(wanted=""):
+    """The incident to brief the caller for: the requested one if it is still
+    waiting, otherwise the most recent one the lab is blocked on."""
+    queue = lab.waiting_incidents()
+    if wanted:
+        for incident in queue:
+            if incident.get("id") == wanted:
+                return incident, queue
+    return (queue[0] if queue else None), queue
 
 
 def load_key():
@@ -131,12 +103,18 @@ def serve(port, model):
             if path in files:
                 name, mime = files[path]
                 return self.send_payload(200, (HERE / name).read_bytes(), mime)
+            if path == "/api/incidents":
+                # The queue the lab is blocked on. An operator chooses which one
+                # to call; nothing here places a call by itself.
+                return self.send_payload(200, {
+                    "incidents": [lab.summarize(i) for i in lab.waiting_incidents()]})
             if path == "/api/session":
                 # The key reaches the browser because the browser owns the Gemini
                 # socket. Bound to localhost; do not expose this server.
                 # liveSetup is the single source of truth: the page and the smoke
                 # test send this same object, so they cannot drift apart.
-                incident = waiting_incident()
+                wanted = (parse_qs(urlsplit(self.path).query).get("incident") or [""])[0][:100]
+                incident, queue = pick_incident(wanted)
                 brief = from_incident(incident) if incident else FIXTURE
                 return self.send_payload(200, {
                     "apiKey": key, "model": model, "hasKey": bool(key),
@@ -144,6 +122,7 @@ def serve(port, model):
                     "source": brief.get("source", "fixture"),
                     "incidentId": brief.get("incident_id", ""),
                     "callbackPath": brief.get("callback_path", ""),
+                    "queue": [lab.summarize(i) for i in queue],
                     "liveSetup": {
                         "model": "models/" + model,
                         "generationConfig": {"responseModalities": ["AUDIO"]},
@@ -201,13 +180,9 @@ def serve(port, model):
                          "context": context}
                 relay = {"attempted": True, "incident_id": incident_id,
                          "context_chars": len(context)}
-                try:
-                    status, body = lab_post("/api/incidents/%s/context" % incident_id, reply)
-                    relay.update(ok=True, status=status, response=body)
-                except HTTPError as exc:
-                    relay.update(ok=False, status=exc.code, error=exc.read().decode()[:400])
-                except (URLError, OSError, ValueError) as exc:
-                    relay.update(ok=False, error=type(exc).__name__)
+                # A transient rejection is retried inside deliver(): the call
+                # that produced this finding cannot be placed a second time.
+                relay.update(lab.deliver(incident_id, reply))
             record = {"recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                       "incident_id": incident_id or None, "carrier": carrier, "model": model,
                       "finding": finding.model_dump(mode="json"),

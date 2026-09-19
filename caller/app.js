@@ -9,6 +9,7 @@ const MIC_RATE = 16000, OUT_RATE = 24000, CHUNK = 2048;
 const $ = id => document.getElementById(id);
 let session = null, socket = null, micCtx = null, micStream = null, worklet = null;
 let outCtx = null, playHead = 0, sources = [], live = false, talking = false, finding = null;
+let selected = '';   // incident the operator chose from the queue
 const transcript = [];
 
 const setStatus = (text, cls) => { $('status').textContent = text; $('status').className = 'badge ' + (cls || ''); };
@@ -215,7 +216,9 @@ async function call() {
   $('finding-panel').hidden = true;
   render();
   try {
-    session = await (await fetch('/api/session')).json();
+    // Re-read the session as the call starts: the incident may have been
+    // picked up or resolved while this page sat open.
+    session = await loadSession(selected);
     if (!session.hasKey) throw new Error('No Google API key configured');
     outCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: OUT_RATE });
     await outCtx.resume();
@@ -248,13 +251,59 @@ talk.addEventListener('pointerdown', e => { e.preventDefault(); startTalking(); 
 addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && live) { e.preventDefault(); startTalking(); } });
 addEventListener('keyup', e => { if (e.code === 'Space' && live) { e.preventDefault(); stopTalking(); } });
 
-fetch('/api/session').then(r => r.json()).then(s => {
+// The lab does not notify us; the queue is read when the operator asks for it.
+// Selecting a row only changes which brief the next call uses.
+function renderQueue(queue, current) {
+  const list = $('queue');
+  const rows = queue || [];
+  // Always shown: with nothing waiting, Refresh is how an operator picks up an
+  // incident the lab raised after this page was opened.
+  $('queue-panel').hidden = false;
+  if (!rows.length) {
+    const empty = document.createElement('li');
+    empty.className = 'queue-why';
+    empty.textContent = 'Nothing waiting. Refresh after the repair lab escalates; the rehearsal brief is loaded meanwhile.';
+    list.replaceChildren(empty);
+    return;
+  }
+  list.replaceChildren(...rows.map(item => {
+    const li = document.createElement('li');
+    li.className = 'queue-row' + (item.incident_id === current ? ' current' : '');
+    const btn = document.createElement('button');
+    btn.className = 'link';
+    btn.textContent = item.provider + ' · ' + item.incident_id;
+    btn.disabled = live;
+    btn.onclick = () => { selected = item.incident_id; loadSession(selected).catch(() => {}); };
+    const why = document.createElement('span');
+    why.className = 'queue-why';
+    why.textContent = [item.phone, item.reason].filter(Boolean).join(' · ');
+    li.append(btn, why);
+    return li;
+  }));
+}
+
+function applySession(s) {
   session = s;
-  const live = s.source === 'repair-lab';
+  const linked = s.source === 'repair-lab';
+  selected = s.incidentId || '';
   $('context').textContent = s.brief.provider + ' · ' + s.brief.support_line + ' · '
-    + (live ? 'incident ' + s.incidentId : s.brief.order_id) + ' · ' + s.model;
-  $('context').classList.toggle('linked', live);
-  document.title = (live ? 'Escalation — ' + s.brief.provider : 'Escalation — call the provider');
-  setStatus(s.hasKey ? 'Ready' : 'No API key', s.hasKey ? '' : 'bad');
-  $('call').disabled = !s.hasKey;
-}).catch(() => setStatus('Server unreachable', 'bad'));
+    + (linked ? 'incident ' + s.incidentId : s.brief.order_id) + ' · ' + s.model;
+  $('context').classList.toggle('linked', linked);
+  document.title = (linked ? 'Escalation — ' + s.brief.provider : 'Escalation — call the provider');
+  renderQueue(s.queue, s.incidentId);
+  if (!live) {
+    setStatus(s.hasKey ? (linked ? 'Ready · live incident' : 'Ready') : 'No API key', s.hasKey ? '' : 'bad');
+    $('call').disabled = !s.hasKey;
+  }
+  return s;
+}
+
+async function loadSession(incidentId) {
+  const query = incidentId ? '?incident=' + encodeURIComponent(incidentId) : '';
+  const response = await fetch('/api/session' + query);
+  if (!response.ok) throw new Error('Session unavailable (HTTP ' + response.status + ')');
+  return applySession(await response.json());
+}
+
+$('refresh').onclick = () => loadSession(selected).catch(err => setStatus(err.message, 'bad'));
+loadSession('').catch(() => setStatus('Server unreachable', 'bad'));
