@@ -31,16 +31,24 @@ const RepairFlow=(()=>{
   }
   return {nodes,carrier,events,redacted,optimized};
  }
- let template=null,loading=null,lastRender=null,theme='dark';
+ let template=null,loading=null,lastRender=null;
  function diagram(){
   if(!loading)loading=fetch('/flow.svg').then(r=>{if(!r.ok)throw new Error('Diagram unavailable');return r.text();}).then(text=>{template=new DOMParser().parseFromString(text,'text/html').querySelector('svg');if(lastRender)render(...lastRender);}).catch(()=>{loading=null;});
  }
  function render(root,run,company){
   lastRender=[root,run,company];const data=state(run,company.id);if(lastCarrier!==company.id){selectedNode='sandbox';lastCarrier=company.id;}
-  root.replaceChildren();root.className='repair-flow archify-panel';root.dataset.theme=theme;
+  root.replaceChildren();root.className='repair-flow archify-panel';
   const header=document.createElement('div');header.className='archify-header';
   const text=document.createElement('div');const kicker=document.createElement('p');kicker.className='archify-kicker';kicker.textContent='HANDSHAKE / LIVE SYSTEM';const title=document.createElement('h3');title.textContent=company.name;const caption=document.createElement('p');caption.textContent='Every step comes from a recorded event. Select a node to inspect the evidence.';text.append(kicker,title,caption);
-  const controls=document.createElement('div');controls.className='archify-controls';const status=document.createElement('span');status.className='archify-status';status.textContent=(data.carrier?.status||'ready').replaceAll('_',' ').toUpperCase();const toggle=document.createElement('button');toggle.className='archify-toggle';toggle.textContent=theme==='dark'?'Light theme':'Dark theme';toggle.onclick=()=>{theme=theme==='dark'?'light':'dark';render(root,run,company);};controls.append(status,toggle);header.append(text,controls);root.append(header);
+  const controls=document.createElement('div');controls.className='archify-controls';const status=document.createElement('span');status.className='archify-status';status.textContent=(data.carrier?.status||'ready').replaceAll('_',' ').toUpperCase();controls.append(status);header.append(text,controls);root.append(header);
+  const resources=document.createElement('nav');resources.className='archify-links';resources.setAttribute('aria-label',company.name+' flow resources');
+  const addLink=(label,url)=>{const a=document.createElement('a');a.textContent=label+' ↗';a.href=url;a.target='_blank';a.rel='noopener';resources.append(a);};
+  addLink('Carrier API docs',company.documentation_url+`?attack=${run?.attack?1:0}`);
+  addLink('Gateway rules & guardrails','https://logfire-eu.pydantic.dev/mtokmak06/-/gateway/endpoints');
+  addLink('Modal dashboard','https://modal.com/apps/mtokmak06/main/deployed/handshake-live-demo');
+  if(data.carrier?.trace_url)addLink('Logfire trace',data.carrier.trace_url);
+  if(data.carrier?.incident_id)addLink('Contact incident','/api/incidents/'+encodeURIComponent(data.carrier.incident_id));
+  root.append(resources);
   const canvas=document.createElement('div');canvas.className='archify-canvas';
   if(template){
    const chart=template.cloneNode(true);chart.setAttribute('aria-label',company.name+' live repair workflow');
@@ -48,7 +56,7 @@ const RepairFlow=(()=>{
     const id=node.dataset.nodeId,step=data.nodes[id];if(!step)continue;
     node.classList.add('live-node',step.status);if(selectedNode===id)node.classList.add('live-selected');
     node.setAttribute('aria-label',node.dataset.nodeLabel+': '+step.detail);node.setAttribute('aria-pressed',String(selectedNode===id));
-    const detail=node.querySelector('[data-detail="context"]');if(detail)detail.textContent=step.detail;
+    const detail=node.querySelector('[data-detail="context"]');if(detail)detail.textContent=step.detail;const tooltip=node.querySelector('title');if(tooltip)tooltip.textContent=node.dataset.nodeLabel+': '+step.detail;
     const inspect=()=>{selectedNode=id;render(root,run,company);};node.addEventListener('click',inspect);node.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();inspect();}});
    }
    for(const edge of chart.querySelectorAll('[data-edge-id]')){
@@ -64,7 +72,7 @@ const RepairFlow=(()=>{
    canvas.append(chart);
   }else{const pending=document.createElement('p');pending.textContent='Loading the live architecture…';canvas.append(pending);diagram();}
   root.append(canvas);
-  const proof=document.createElement('div');proof.className='archify-proof';const summary=document.createElement('div');const label=document.createElement('p');label.className='archify-kicker';label.textContent='SELECTED STEP / '+data.nodes[selectedNode].status.toUpperCase();const heading=document.createElement('h4');heading.textContent=specs.find(n=>n[0]===selectedNode)[1];const detail=document.createElement('p');detail.textContent=data.nodes[selectedNode].detail;summary.append(label,heading,detail);
+  const proof=document.createElement('div');proof.className='archify-proof';const summary=document.createElement('div');const label=document.createElement('p');label.className='archify-kicker';label.textContent='SELECTED STEP / '+data.nodes[selectedNode].status.toUpperCase();const heading=document.createElement('h4');heading.textContent=specs.find(n=>n[0]===selectedNode)[1];const detail=document.createElement('p');detail.textContent=data.nodes[selectedNode].detail;summary.append(label,heading,detail);const inspect=document.createElement('a');inspect.href='#details';inspect.textContent='View carrier evidence ↓';inspect.className='archify-evidence-link';summary.append(inspect);
   const evidence=data.nodes[selectedNode].events.at(-1),pre=document.createElement('pre');pre.textContent=evidence?JSON.stringify(evidence.data,null,2):'No event recorded for this step yet.';proof.append(summary,pre);root.append(proof);
  }
  return {state,render};
