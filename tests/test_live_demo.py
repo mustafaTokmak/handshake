@@ -82,6 +82,13 @@ class SharedDemo(unittest.TestCase):
             self.assertEqual(document['company']['documentation_url'], carrier['documentation_url'])
         self.assertEqual(self.request('POST', '/api/sessions', {}, 'https://untrusted.example')[0], 403)
 
+    def test_config_points_an_operator_at_the_escalation_caller(self):
+        # The caller runs on the operator's own machine, never on the demo
+        # host: it holds the Gemini key and the microphone.
+        config = self.request('GET', '/api/config')[1]
+        self.assertTrue(config['caller_url'].startswith('http://127.0.0.1:'))
+        self.assertNotIn('8770', config['caller_url'])
+
 
 class RemotePersistence(unittest.TestCase):
     def test_shared_records_survive_store_recreation(self):

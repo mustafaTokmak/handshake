@@ -360,6 +360,47 @@ Build the attack first, so the failing baseline exists before the fix does.
 
 ---
 
+## 9a. The voice channel (`caller/`)
+
+Escalation adds a second untrusted input path, and it deserves saying plainly: a
+human on a phone line is an injection surface. The representative may be wrong,
+may be guessing, or may be someone who is not the carrier at all. Speech
+recognition then turns whatever they said into text that travels toward an agent
+that writes code. Nothing about "it was spoken by a person" makes it trusted.
+
+**What crosses the boundary.** Only a `CallFinding` (`caller/models.py`): a
+three-value status, a bounded summary, and an optional `ContractChange` whose
+every field is length-capped and whose lists are count-capped, on a model with
+`extra="forbid"`. The raw transcript is written to `caller/calls/*.json` for a
+human to read and is **never** sent to the lab. The voice model reaches this
+schema through a function declaration kept in the same file as the model, so the
+two cannot drift apart unnoticed.
+
+**How it is framed.** `to_context()` prepends `UNTRUSTED_HEADER`, which names the
+input as a third-party claim rather than an instruction and scopes it to the one
+carrier adapter under repair. That header is *written*, not spoken: it is
+composed on our side after the call, so a representative cannot talk it away, and
+it survives truncation because `_fit()` trims the tail.
+
+**What it still cannot do.** Nothing in a finding authorizes an action. It becomes
+`ContactReply.context` — the same field a teammate's typed message would occupy —
+and the repair agent's existing guardrails apply unchanged. A finding cannot
+change other carriers, pricing truth, sandbox behaviour, or any system
+instruction, because the only thing downstream of it is another repair attempt
+that must still pass validation in the sandbox.
+
+**Residual risk.** A convincing wrong answer costs one wasted repair attempt. That
+is the intended failure mode: the channel is designed so that being lied to is
+expensive in attempts, not in invariants.
+
+**Operational note.** The caller binds `127.0.0.1` and is never deployed. The
+Gemini key reaches the browser because the browser owns the Live socket; exposing
+that server would hand out the key. The relay authenticates to the lab with
+`CONTACT_CALLBACK_TOKEN`, so an incident cannot be fed context by anyone who
+merely knows its id.
+
+---
+
 ## 10. One-line version
 
 The agent's safety property is currently a sentence in a prompt; three lines of code in

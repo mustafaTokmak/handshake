@@ -7,7 +7,7 @@ function key(){for(const n of NAMES)if(process.env[n])return process.env[n].trim
  for(const p of ['.env','../.env']){try{const t=readFileSync(p,'utf8');
   for(const n of NAMES){const m=t.match(new RegExp('^'+n+"\\s*=\\s*['\"]?([^'\"\\s]+)",'m'));if(m)return m[1];}}catch{}}return'';}
 const API=key();
-const S=await fetch('http://127.0.0.1:8770/api/session').then(r=>r.json());
+const S=await fetch(`${CALLER}/api/session`).then(r=>r.json());
 
 // What the human "support rep" says, fed in as text turns on cue.
 const REPLIES = [
@@ -48,7 +48,7 @@ ws.onmessage=async e=>{
       if(fc.name==='report_finding'){finding=fc.args;
         console.log('\n=== report_finding ===');
         console.log(JSON.stringify(fc.args,null,2));
-        const r=await fetch('http://127.0.0.1:8770/api/finding',{method:'POST',
+        const r=await fetch(`${CALLER}/api/finding`,{method:'POST',
           headers:{'Content-Type':'application/json'},body:JSON.stringify({finding:fc.args,transcript:[],incidentId:S.incidentId||'',carrier:(S.brief&&S.brief.provider)||''})});
         const b=await r.json();
         console.log('\nserver validation:',r.ok?'ACCEPTED -> '+b.saved:'REJECTED -> '+(b.detail||b.error));

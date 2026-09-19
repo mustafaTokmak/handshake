@@ -2,6 +2,8 @@
 // message get accepted? Run: node smoke.mjs [model]
 import { readFileSync } from 'node:fs';
 
+const PORT = process.env.CALLER_PORT || '8771';   // caller/server.py DEFAULT_PORT
+const CALLER = `http://127.0.0.1:${PORT}`;
 const NAMES = ['GOOGLE_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_GENAI_API_KEY', 'GOOGLE_API'];
 function key() {
   for (const n of NAMES) if (process.env[n]) return process.env[n].trim();
@@ -33,7 +35,7 @@ if (!live.length) { console.error('\nNo bidi-capable models. This key cannot use
 const want = process.argv[2] || (live.find(m => /3\.8-live/.test(m)) || live.find(m => /native-audio/.test(m)) || live[0]);
 console.log('\nTesting setup handshake with:', want);
 
-const session = await fetch('http://127.0.0.1:8770/api/session').then(r => r.json()).catch(() => null);
+const session = await fetch(`${CALLER}/api/session`).then(r => r.json()).catch(() => null);
 
 const ws = new WebSocket(`wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${API}`);
 const done = setTimeout(() => { console.error('TIMEOUT: no setupComplete in 20s'); process.exit(1); }, 20000);

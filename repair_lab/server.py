@@ -31,7 +31,7 @@ def create_server(port=8780, state_dir=Path('state'), host='127.0.0.1', store=No
             if path in ('/', '/app.js', '/flow.js', '/flow.svg', '/archify.css', '/style.css'):
                 name, mime = {'/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript'), '/flow.js': ('flow.js', 'text/javascript'), '/flow.svg': ('flow.svg', 'image/svg+xml'), '/archify.css': ('archify.css', 'text/css'), '/style.css': ('style.css', 'text/css')}[path]
                 return self.send(200, (static/name).read_bytes(), mime)
-            if path == '/api/config': return self.send(200, {'carriers': [public_company(c) | {'documentation_url': f'/carriers/{c["id"]}/docs'} for c in CARRIERS], 'gateway_configured': bool(os.getenv('PYDANTIC_AI_GATEWAY_API_KEY')), 'route': os.getenv('REPAIR_GATEWAY_ROUTE', 'repair-lab'), 'model': os.getenv('HANDSHAKE_MODEL'), 'contact_mode': 'stub_no_call_placed', 'session_mode': 'shared'})
+            if path == '/api/config': return self.send(200, {'carriers': [public_company(c) | {'documentation_url': f'/carriers/{c["id"]}/docs'} for c in CARRIERS], 'gateway_configured': bool(os.getenv('PYDANTIC_AI_GATEWAY_API_KEY')), 'route': os.getenv('REPAIR_GATEWAY_ROUTE', 'repair-lab'), 'model': os.getenv('HANDSHAKE_MODEL'), 'contact_mode': 'stub_no_call_placed', 'session_mode': 'shared', 'caller_url': f'http://127.0.0.1:{os.getenv("CALLER_PORT", "8771")}'})
             parts = path.strip('/').split('/')
             if len(parts) == 3 and parts[0] == 'carriers' and parts[1] in BY_ID and parts[2] in ('docs', 'api-doc'):
                 attack = parse_qs(parsed.query).get('attack', ['1'])[0] == '1'

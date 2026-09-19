@@ -7,9 +7,8 @@ persists validated findings. Stdlib only, to match breaker-demo and to avoid
 depending on the handshake toolchain.
 """
 import argparse
+import errno
 import json
-import os
-import re
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -17,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 from urllib.request import urlopen
 
+import env
 import lab
 from brief import FIXTURE, from_incident, instruction_for
 from models import FINDING_DECLARATION, CallFinding, to_context
@@ -24,6 +24,11 @@ from models import FINDING_DECLARATION, CallFinding, to_context
 HERE = Path(__file__).resolve().parent
 CALLS = HERE / "calls"
 DEFAULT_MODEL = "gemini-3.8-live"
+# 8770 is claimed by macOS sharingd on a stock machine, which made the caller
+# die on startup with nothing but an EADDRINUSE. Start above it and, when the
+# port was not asked for by name, walk forward rather than refusing to run.
+DEFAULT_PORT = 8771
+PORT_SCAN = 8
 KEY_NAMES = ("GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_GENAI_API_KEY", "GOOGLE_API")
 # Generous: the page posts the finding plus the whole call transcript, and a
 # finding's list entries carry no length limit of their own. to_context() is
@@ -43,20 +48,8 @@ def pick_incident(wanted=""):
 
 
 def load_key():
-    for name in KEY_NAMES:
-        value = os.environ.get(name, "").strip()
-        if value:
-            return value
-    for path in (HERE / ".env", HERE.parent / ".env"):
-        try:
-            text = path.read_text()
-        except OSError:
-            continue
-        for name in KEY_NAMES:
-            found = re.search(r"^%s\s*=\s*['\"]?([^'\"\s]+)" % name, text, re.M)
-            if found:
-                return found.group(1)
-    return ""
+    """The Gemini key, under whichever of its several names it was written."""
+    return env.first(KEY_NAMES)
 
 
 def list_live_models(key):
@@ -72,7 +65,20 @@ def list_live_models(key):
     return sorted(names)
 
 
-def serve(port, model):
+def bind(handler, port, scan=1):
+    """First free port at or after `port`. scan=1 means: this one or nothing."""
+    last = None
+    for candidate in range(port, port + max(scan, 1)):
+        try:
+            return ThreadingHTTPServer(("127.0.0.1", candidate), handler)
+        except OSError as exc:
+            if exc.errno not in (errno.EADDRINUSE, errno.EACCES):
+                raise
+            last = exc
+    raise last
+
+
+def serve(port, model, scan=1):
     key = load_key()
     CALLS.mkdir(exist_ok=True)
 
@@ -195,9 +201,15 @@ def serve(port, model):
         def log_message(self, *_):
             pass
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = bind(Handler, port, scan)
+    port = server.server_port
     print("Escalation caller: http://127.0.0.1:%d" % port, flush=True)
     print("API key: %s   model: %s" % ("present" if key else "MISSING", model), flush=True)
+    # The relay target and its credential are the two things that decide
+    # whether a finding reaches the lab, so say both before a call is placed
+    # rather than after one has already been made.
+    print("Repair lab: %s   callback token: %s" % (
+        lab.lab_url(), "present" if lab.callback_token() else "MISSING"), flush=True)
     if not key:
         print("Set GOOGLE_API_KEY, or put it in caller/.env", flush=True)
     try:
@@ -210,8 +222,9 @@ def serve(port, model):
 
 def main():
     parser = argparse.ArgumentParser(description="Local escalation caller")
-    parser.add_argument("--port", type=int, default=8770)
-    parser.add_argument("--model", default=os.environ.get("CALLER_MODEL", DEFAULT_MODEL))
+    parser.add_argument("--port", type=int, default=None,
+                        help="Default %d, or the next free port after it" % DEFAULT_PORT)
+    parser.add_argument("--model", default=env.get("CALLER_MODEL", DEFAULT_MODEL))
     parser.add_argument("--list-models", action="store_true", help="Print Live-capable models for this key and exit")
     args = parser.parse_args()
     if args.list_models:
@@ -221,7 +234,9 @@ def main():
             raise SystemExit(1)
         print(json.dumps(list_live_models(key), indent=2))
         return
-    serve(args.port, args.model)
+    # An explicit --port is an instruction; the default is only a preference.
+    chosen = args.port or int(env.get("CALLER_PORT", DEFAULT_PORT))
+    serve(chosen, args.model, scan=1 if args.port else PORT_SCAN)
 
 
 if __name__ == "__main__":

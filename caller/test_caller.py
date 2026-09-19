@@ -6,15 +6,32 @@ surface is faked, because what is under test is how we read its records and
 how we behave when it rejects or stalls.
 """
 import importlib.util
+import io
 import json
+import os
+import socket
+import sys
+import tempfile
 import unittest
+import unittest.mock
+from http.server import BaseHTTPRequestHandler
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 
+# caller/ is a plain directory of scripts, not a package: server.py does a bare
+# `import lab`. Put it on the path so this suite also runs from the repo root
+# (python -m unittest caller.test_caller) and not only from inside caller/.
+HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+import env
 import lab
 from models import MAX_CONTEXT, CallFinding, to_context
-from server import pick_incident
+from server import DEFAULT_PORT, bind, pick_incident
 
-LAB_MODELS = importlib.util.spec_from_file_location("lab_models", "../repair_lab/models.py")
+LAB_MODELS = importlib.util.spec_from_file_location(
+    "lab_models", HERE.parent / "repair_lab" / "models.py")
 ContactReply = None
 if LAB_MODELS:
     _module = importlib.util.module_from_spec(LAB_MODELS)
@@ -266,3 +283,135 @@ class ContextRendering(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Configuration(unittest.TestCase):
+    """The caller must read the same .env the lab reads, or it authenticates
+    its relay with nothing and loses a finding to a 401 after the call."""
+
+    def setUp(self):
+        self._files = env.FILES
+        env.reload()
+
+    def tearDown(self):
+        env.FILES = self._files
+        env.reload()
+
+    def write(self, text):
+        path = Path(self.enterContext(tempfile.TemporaryDirectory())) / ".env"
+        path.write_text(text)
+        env.FILES = (path,)
+        env.reload()
+        return path
+
+    def test_reads_the_callback_token_the_lab_enforces(self):
+        self.write("CONTACT_CALLBACK_TOKEN=shared-secret\n")
+        with unittest.mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CONTACT_CALLBACK_TOKEN", None)
+            self.assertEqual(lab.callback_token(), "shared-secret")
+
+    def test_process_environment_wins_over_the_file(self):
+        self.write("REPAIR_LAB_URL=http://127.0.0.1:8780\n")
+        with unittest.mock.patch.dict(os.environ, {"REPAIR_LAB_URL": "https://lab.example"}):
+            self.assertEqual(lab.lab_url(), "https://lab.example")
+
+    def test_a_trailing_slash_does_not_double_up_in_the_path(self):
+        self.write("REPAIR_LAB_URL=https://lab.example/\n")
+        with unittest.mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("REPAIR_LAB_URL", None)
+            self.assertEqual(lab.lab_url(), "https://lab.example")
+
+    def test_quotes_comments_and_export_are_understood(self):
+        self.write('# a comment\nexport CALLER_MODEL="gemini-3.8-live"\nCALLER_PORT=8771\n')
+        with unittest.mock.patch.dict(os.environ, {}, clear=False):
+            for name in ("CALLER_MODEL", "CALLER_PORT"):
+                os.environ.pop(name, None)
+            self.assertEqual(env.get("CALLER_MODEL"), "gemini-3.8-live")
+            self.assertEqual(env.get("CALLER_PORT"), "8771")
+
+    def test_falls_back_to_the_default_lab_when_nothing_is_configured(self):
+        self.write("")
+        with unittest.mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("REPAIR_LAB_URL", None)
+            self.assertEqual(lab.lab_url(), lab.DEFAULT_LAB_URL)
+
+
+class UnauthorizedRelay(unittest.TestCase):
+    """A 401 is not a transient failure, but it is worth one re-read: the token
+    may have been supplied after this process started."""
+
+    def setUp(self):
+        self._post, self._files = lab.post, env.FILES
+        self.addCleanup(setattr, lab, "post", self._post)
+        self.addCleanup(setattr, env, "FILES", self._files)
+        self.addCleanup(env.reload)
+
+    def unauthorized(self, times):
+        calls = []
+
+        def fake(path, payload):
+            calls.append(payload)
+            if len(calls) <= times:
+                raise HTTPError(path, 401, "Unauthorized", {},
+                                io.BytesIO(b'{"error": "Callback authentication required"}'))
+            return 202, {"accepted": True}
+
+        lab.post = fake
+        return calls
+
+    def test_stops_and_explains_when_no_token_can_be_found(self):
+        calls = self.unauthorized(9)
+        path = Path(self.enterContext(tempfile.TemporaryDirectory())) / ".env"
+        path.write_text("")
+        env.FILES = (path,)
+        env.reload()
+        with unittest.mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CONTACT_CALLBACK_TOKEN", None)
+            result = lab.deliver("INC-1", {"context": "x"}, sleep=lambda _s: None)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], 401)
+        self.assertEqual(len(calls), 1, "a rejected credential must not be replayed")
+        self.assertIn("CONTACT_CALLBACK_TOKEN", result["hint"])
+
+    def test_retries_once_when_the_token_appears_in_the_env_file(self):
+        calls = self.unauthorized(1)
+        path = Path(self.enterContext(tempfile.TemporaryDirectory())) / ".env"
+        path.write_text("")
+        env.FILES = (path,)
+        env.reload()
+        path.write_text("CONTACT_CALLBACK_TOKEN=appeared-mid-demo\n")
+        with unittest.mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CONTACT_CALLBACK_TOKEN", None)
+            result = lab.deliver("INC-1", {"context": "x"}, sleep=lambda _s: None)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["attempts"], 2)
+        self.assertEqual(lab.callback_token(), "appeared-mid-demo")
+
+
+class PortBinding(unittest.TestCase):
+    """8770 is taken by macOS sharingd on a stock machine, which killed the
+    caller at startup. The default must step over an occupied port."""
+
+    def test_the_default_is_clear_of_the_sharingd_port(self):
+        self.assertNotEqual(DEFAULT_PORT, 8770)
+
+    def test_walks_forward_past_a_port_already_in_use(self):
+        holder = socket.socket()
+        self.addCleanup(holder.close)
+        holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        holder.bind(("127.0.0.1", 0))
+        holder.listen(1)
+        taken = holder.getsockname()[1]
+        server = bind(BaseHTTPRequestHandler, taken, scan=4)
+        self.addCleanup(server.server_close)
+        self.assertNotEqual(server.server_port, taken)
+        self.assertLess(server.server_port, taken + 4)
+
+    def test_an_explicitly_named_port_is_not_silently_moved(self):
+        holder = socket.socket()
+        self.addCleanup(holder.close)
+        holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        holder.bind(("127.0.0.1", 0))
+        holder.listen(1)
+        with self.assertRaises(OSError):
+            bind(BaseHTTPRequestHandler, holder.getsockname()[1], scan=1)

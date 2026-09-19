@@ -5,12 +5,13 @@ assumed and every parse is defensive. Nothing here decides anything: it finds
 the incidents the lab is blocked on and delivers a reply it was handed.
 """
 import json
-import os
 import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-LAB_URL = os.environ.get("REPAIR_LAB_URL", "http://127.0.0.1:8780").rstrip("/")
+import env
+
+DEFAULT_LAB_URL = "http://127.0.0.1:8780"
 TIMEOUT = 8
 MAX_QUEUE = 10
 # The lab rejects a second reply while the previous repair worker is still
@@ -21,18 +22,28 @@ TRANSIENT_MARKERS = ("retry", "already running", "finishing")
 NETWORK_ERRORS = (URLError, OSError, ValueError)
 
 
+def lab_url():
+    """Read at call time, not import time, so a reload() is visible here."""
+    return env.get("REPAIR_LAB_URL", DEFAULT_LAB_URL).rstrip("/")
+
+
+def callback_token():
+    """The bearer the lab expects on /context. Shared with it through .env."""
+    return env.get("CONTACT_CALLBACK_TOKEN")
+
+
 def get(path):
-    with urlopen(LAB_URL + path, timeout=TIMEOUT) as response:
+    with urlopen(lab_url() + path, timeout=TIMEOUT) as response:
         return json.loads(response.read().decode())
 
 
 def post(path, payload):
     body = json.dumps(payload).encode()
     headers = {"Content-Type": "application/json"}
-    token = os.environ.get("CONTACT_CALLBACK_TOKEN", "").strip()
+    token = callback_token()
     if token:
         headers["Authorization"] = "Bearer " + token
-    request = Request(LAB_URL + path, data=body, headers=headers, method="POST")
+    request = Request(lab_url() + path, data=body, headers=headers, method="POST")
     with urlopen(request, timeout=TIMEOUT) as response:
         return response.status, json.loads(response.read().decode() or "{}")
 
@@ -104,10 +115,14 @@ def deliver(incident_id, reply, sleep=time.sleep):
 
     A validation rejection is final and is reported as-is; a busy worker or an
     unreachable lab is retried, because the finding is the product of a phone
-    call that cannot be placed again.
+    call that cannot be placed again. A 401 is neither: the lab wants a
+    callback token we did not send, so the .env is re-read once in case the
+    operator supplied it after this process started. Only once — repeating a
+    rejected credential is not a retry, it is a loop.
     """
     path = "/api/incidents/%s/context" % incident_id
     attempts = 0
+    reread = False
     result = {"ok": False, "attempts": 0}
     while attempts < DELIVERY_ATTEMPTS:
         attempts += 1
@@ -120,6 +135,15 @@ def deliver(incident_id, reply, sleep=time.sleep):
             except OSError:
                 detail = ""
             result = {"ok": False, "status": exc.code, "error": detail or str(exc.reason), "attempts": attempts}
+            if exc.code == 401 and not reread:
+                reread = True
+                before = callback_token()
+                env.reload()
+                if callback_token() and callback_token() != before:
+                    continue
+                result["hint"] = ("The lab requires CONTACT_CALLBACK_TOKEN. Set it in .env "
+                                  "beside the lab's own value and relay this call again.")
+                return result
             if not _is_transient(exc.code, detail):
                 return result
         except NETWORK_ERRORS as exc:
