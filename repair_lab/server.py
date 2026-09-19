@@ -35,8 +35,8 @@ def create_server(port=8780, state_dir=Path('state'), host='127.0.0.1', store=No
             parts = path.strip('/').split('/')
             if len(parts) == 3 and parts[0] == 'carriers' and parts[1] in BY_ID and parts[2] in ('docs', 'api-doc'):
                 attack = parse_qs(parsed.query).get('attack', ['1'])[0] == '1'
-                if parts[2] == 'api-doc': return self.send(200, doc_record(parts[1], attack))
-                html = doc_html(parts[1], attack).replace('href="/api-doc?', f'href="/carriers/{parts[1]}/api-doc?')
+                if parts[2] == 'api-doc': return self.send(200, doc_record(parts[1], attack, hosted=True))
+                html = doc_html(parts[1], attack, hosted=True).replace('href="/api-doc?', f'href="/carriers/{parts[1]}/api-doc?')
                 return self.send(200, html.encode(), 'text/html; charset=utf-8')
             if path == '/api/runs': return self.send(200, [{k:r[k] for k in ('id', 'created_at', 'condition', 'order', 'carriers')} | {'started_at': r.get('started_at')} for r in store.runs()])
             if path == '/api/latest': return self.send(200, store.latest())

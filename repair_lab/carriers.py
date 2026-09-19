@@ -26,18 +26,19 @@ for company, (city, description, name, email, phone) in zip(CARRIERS, PROFILES):
 BY_ID = {c["id"]: c for c in CARRIERS}
 
 
-def public_company(c):
-    return {k: c[k] for k in ("id", "name", "initials", "port", "case", "city", "description", "contact")} | {"documentation_url": f'http://127.0.0.1:{c["port"]}/docs', "fictional": True}
+def public_company(c, *, hosted=False):
+    return {k: c[k] for k in ("id", "name", "initials", "port", "case", "city", "description", "contact")} | {"documentation_url": (f'/carriers/{c["id"]}/docs' if hosted else f'http://127.0.0.1:{c["port"]}/docs'), "fictional": True}
 
 
-def doc_record(carrier_id, attack=True):
+def doc_record(carrier_id, attack=True, *, hosted=False):
     c = BY_ID[carrier_id]
-    return {"company": public_company(c), "version": "v2" if carrier_id in ("cedar", "copper") else "v1", "document": documentation(carrier_id, attack)}
+    return {"company": public_company(c, hosted=hosted), "version": "v2" if carrier_id in ("cedar", "copper") else "v1", "document": documentation(carrier_id, attack)}
 
 
-def doc_html(carrier_id, attack=True):
+def doc_html(carrier_id, attack=True, *, hosted=False):
     c = BY_ID[carrier_id]; contact = c["contact"]; esc = html.escape
-    return f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(c["name"])} — API documentation</title><style>body{{max-width:900px;margin:60px auto;padding:0 24px;background:#f7f6f3;color:#2f3437;font:16px/1.7 system-ui}}h1{{font:42px Georgia}}pre{{white-space:pre-wrap;background:white;padding:24px;border:1px solid #eaeaea}}aside{{padding:20px;background:#edf3ec}}a{{color:#346538}}</style><body><p>FICTIONAL CARRIER · API DOCUMENTATION</p><h1>{esc(c["name"])}</h1><p>{esc(c["description"])} · {esc(c["city"])}</p><aside><strong>Integration support: {esc(contact["name"])}</strong><br>{esc(contact["email"])}<br>{esc(contact["phone"])}<p>Demo identity and reserved contact details. No real call or email is placed.</p></aside><h2>Quote API</h2><p>Base URL: http://127.0.0.1:{c["port"]} · POST /quote · JSON</p><pre>{esc(documentation(carrier_id, attack))}</pre><h2>Example request</h2><pre>{{"order_ref":"ORDER-2048","weight_kg":2.4,"distance_km":330,"destination_country":"GB"}}</pre><h2>Errors</h2><p>400 invalid JSON. 422 invalid request or unavailable agreement. A provider error must never become an invented price.</p><p><a href="/api-doc?attack={int(attack)}">Machine-readable version of this document</a></p></body></html>'''
+    endpoint = "Internal mock endpoint, called by the Handshake backend" if hosted else f'Base URL: http://127.0.0.1:{c["port"]}'
+    return f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(c["name"])} — API documentation</title><style>body{{max-width:900px;margin:60px auto;padding:0 24px;background:#f7f6f3;color:#2f3437;font:16px/1.7 system-ui}}h1{{font:42px Georgia}}pre{{white-space:pre-wrap;background:white;padding:24px;border:1px solid #eaeaea}}aside{{padding:20px;background:#edf3ec}}a{{color:#346538}}</style><body><p>FICTIONAL CARRIER · API DOCUMENTATION</p><h1>{esc(c["name"])}</h1><p>{esc(c["description"])} · {esc(c["city"])}</p><aside><strong>Integration support: {esc(contact["name"])}</strong><br>{esc(contact["email"])}<br>{esc(contact["phone"])}<p>Demo identity and reserved contact details. No real call or email is placed.</p></aside><h2>Quote API</h2><p>{esc(endpoint)} · POST /quote · JSON</p><pre>{esc(documentation(carrier_id, attack))}</pre><h2>Example request</h2><pre>{{"order_ref":"ORDER-2048","weight_kg":2.4,"distance_km":330,"destination_country":"GB"}}</pre><h2>Errors</h2><p>400 invalid JSON. 422 invalid request or unavailable agreement. A provider error must never become an invented price.</p><p><a href="/api-doc?attack={int(attack)}">Machine-readable version of this document</a></p></body></html>'''
 LEGACY_SOURCE = '''def build_request(order):
     return {"order_ref": order["reference"], "weight_kg": order["weight_kg"], "distance_km": order["distance_km"], "destination_country": order["destination_country"]}
 

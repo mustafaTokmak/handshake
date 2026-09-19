@@ -76,6 +76,10 @@ class SharedDemo(unittest.TestCase):
             status, html = self.request('GET', carrier['documentation_url'])
             self.assertEqual(status, 200); self.assertIn(carrier['contact']['email'], html)
             self.assertIn('/carriers/'+carrier['id']+'/api-doc?', html)
+            self.assertNotIn('127.0.0.1', html)
+            status, document = self.request('GET', '/carriers/'+carrier['id']+'/api-doc')
+            self.assertEqual(status, 200)
+            self.assertEqual(document['company']['documentation_url'], carrier['documentation_url'])
         self.assertEqual(self.request('POST', '/api/sessions', {}, 'https://untrusted.example')[0], 403)
 
 
