@@ -43,7 +43,7 @@ class Coordinator:
     def __init__(self, store):
         self.store = store; self.active = set(); self.lock = threading.RLock()
         # A crashed process cannot leave a run silently marked as actively repairing.
-        for run in store.runs():
+        for run in store.runs(limit=None):
             for cid, state in run["carriers"].items():
                 if state["status"] in ("loading", "repairing", "resuming"):
                     status = "interrupted"

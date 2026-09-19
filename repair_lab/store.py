@@ -32,8 +32,11 @@ class Store:
             row = self.db.execute("SELECT data FROM runs ORDER BY created_at DESC LIMIT 1").fetchone()
             return json.loads(row[0]) if row else None
 
-    def runs(self):
-        with self.lock: return [json.loads(r[0]) for r in self.db.execute("SELECT data FROM runs ORDER BY created_at DESC LIMIT 30")]
+    def runs(self, *, limit=30):
+        query = "SELECT data FROM runs ORDER BY created_at DESC"
+        parameters = () if limit is None else (limit,)
+        if limit is not None: query += " LIMIT ?"
+        with self.lock: return [json.loads(r[0]) for r in self.db.execute(query, parameters)]
 
     def update_carrier(self, run_id, carrier_id, **changes):
         with self.lock:

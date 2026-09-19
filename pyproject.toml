@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = ["pydantic>=2.12,<3", "pydantic-ai-slim[openai]>=2.46,<3", "logfire>=5,<6", "python-dotenv>=1,<2", "modal>=1.5,<2", "httpx>=0.28,<1"]
 
 [project.scripts]
+handshake = "repair_lab.cli:main"
 repair-lab = "repair_lab.cli:main"
 
 [build-system]

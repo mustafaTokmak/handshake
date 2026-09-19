@@ -1,9 +1,0 @@
-{
-  "name": "Handshake — reconcile before retry",
-  "action": "Transform",
-  "target_route": "modal",
-  "instruction": "After a timeout from an operation that may have created a shipment, treat the outcome as unknown. Preserve the original request key. Before making another creation request, consult the provider's documented request-status or idempotency mechanism. If the request succeeded, recover the existing shipment. If it is pending or cannot be resolved, make at most three reconciliation lookups, then report unresolved. Retry only when supported by the provider contract, reusing the original key. Do not invent a new key to bypass uncertainty. An expired idempotency guarantee or key/order mismatch is unresolved. Report completion only after verifying the shipment identifier and tracking details with get_shipment.",
-  "setup_url": "https://pydantic.dev/hackathon",
-  "feature_flag": "#enableFlags=gateway_optimizations",
-  "verification": "Disable the Caveman warm-up. Create this custom optimization in Gateway, choose an appropriate category offered by the UI, select Transform and bind it to modal. Compare disabled/enabled runs with unchanged agent code. Confirm requests changed in the rule Usage chart and retain actual Logfire traces. The local condition label does not toggle or verify the remote rule."
-}
