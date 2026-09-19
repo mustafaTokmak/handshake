@@ -8,6 +8,7 @@ from .carriers import CARRIERS, BY_ID, public_company, contact_context, start_ca
 from .coordinator import Coordinator
 from .models import StartRequest, ContactReply
 from .store import Store, ModalStore
+from .experiments import display_run, routes
 
 
 def create_server(port=8780, state_dir=Path('state'), host='127.0.0.1', store=None):
@@ -31,17 +32,17 @@ def create_server(port=8780, state_dir=Path('state'), host='127.0.0.1', store=No
             if path in ('/', '/app.js', '/flow.js', '/flow.svg', '/archify.css', '/style.css'):
                 name, mime = {'/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript'), '/flow.js': ('flow.js', 'text/javascript'), '/flow.svg': ('flow.svg', 'image/svg+xml'), '/archify.css': ('archify.css', 'text/css'), '/style.css': ('style.css', 'text/css')}[path]
                 return self.send(200, (static/name).read_bytes(), mime)
-            if path == '/api/config': return self.send(200, {'carriers': [public_company(c) | {'documentation_url': f'/carriers/{c["id"]}/docs'} for c in CARRIERS], 'gateway_configured': bool(os.getenv('PYDANTIC_AI_GATEWAY_API_KEY')), 'route': os.getenv('REPAIR_GATEWAY_ROUTE', 'repair-lab'), 'model': os.getenv('HANDSHAKE_MODEL'), 'contact_mode': 'stub_no_call_placed', 'session_mode': 'shared'})
+            if path == '/api/config': return self.send(200, {'carriers': [public_company(c) | {'documentation_url': f'/carriers/{c["id"]}/docs'} for c in CARRIERS], 'gateway_configured': bool(os.getenv('PYDANTIC_AI_GATEWAY_API_KEY')), 'route': os.getenv('REPAIR_GATEWAY_ROUTE', 'repair-lab'), 'model': os.getenv('HANDSHAKE_MODEL'), 'contact_mode': 'stub_no_call_placed', 'session_mode': 'shared', 'experiment_routes': routes()})
             parts = path.strip('/').split('/')
             if len(parts) == 3 and parts[0] == 'carriers' and parts[1] in BY_ID and parts[2] in ('docs', 'api-doc'):
                 attack = parse_qs(parsed.query).get('attack', ['1'])[0] == '1'
                 if parts[2] == 'api-doc': return self.send(200, doc_record(parts[1], attack, hosted=True))
                 html = doc_html(parts[1], attack, hosted=True).replace('href="/api-doc?', f'href="/carriers/{parts[1]}/api-doc?')
                 return self.send(200, html.encode(), 'text/html; charset=utf-8')
-            if path == '/api/runs': return self.send(200, [{k:r[k] for k in ('id', 'created_at', 'condition', 'order', 'carriers')} | {'started_at': r.get('started_at')} for r in store.runs()])
-            if path == '/api/latest': return self.send(200, store.latest())
+            if path == '/api/runs': return self.send(200, [{k:r[k] for k in ('id', 'created_at', 'condition', 'order', 'carriers')} | {'started_at': r.get('started_at'), 'suite': r.get('suite')} for r in store.runs()])
+            if path == '/api/latest': return self.send(200, display_run(store, store.latest()))
             if path.startswith('/api/runs/'):
-                r = store.get_run(path.rsplit('/', 1)[-1]); return self.send(200 if r else 404, r or {'error': 'Run not found'})
+                r = display_run(store, store.get_run(path.rsplit('/', 1)[-1])); return self.send(200 if r else 404, r or {'error': 'Run not found'})
             if path.startswith('/api/incidents/'):
                 r = store.incident(path.rsplit('/', 1)[-1]); return self.send(200 if r else 404, r or {'error': 'Incident not found'})
             return self.send(404, {'error': 'Not found'})
@@ -60,6 +61,8 @@ def create_server(port=8780, state_dir=Path('state'), host='127.0.0.1', store=No
                 if path == '/api/sessions':
                     if data: raise ValueError('New sessions use the default starting state')
                     return self.send(201, coordinator.new_session())
+                if len(parts) == 4 and parts[:2] == ['api', 'sessions'] and parts[3] == 'suite':
+                    return self.send(202, coordinator.start_suite(StartRequest.model_validate(data), parts[2]))
                 if path == '/api/runs' or (len(parts) == 4 and parts[:2] == ['api', 'sessions'] and parts[3] == 'start'):
                     return self.send(202, coordinator.start(StartRequest.model_validate(data), parts[2] if path != '/api/runs' else None))
                 if len(parts) == 4 and parts[:2] == ['api', 'incidents'] and parts[3] in ('context', 'simulate-reply'):

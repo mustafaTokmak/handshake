@@ -29,11 +29,13 @@ class Store:
 
     def latest(self):
         with self.lock:
-            row = self.db.execute("SELECT data FROM runs ORDER BY created_at DESC LIMIT 1").fetchone()
+            row = self.db.execute("SELECT data FROM runs WHERE json_extract(data, '$.parent_id') IS NULL ORDER BY created_at DESC LIMIT 1").fetchone()
             return json.loads(row[0]) if row else None
 
-    def runs(self, *, limit=30):
-        query = "SELECT data FROM runs ORDER BY created_at DESC"
+    def runs(self, *, limit=30, include_children=False):
+        query = "SELECT data FROM runs"
+        if not include_children: query += " WHERE json_extract(data, '$.parent_id') IS NULL"
+        query += " ORDER BY created_at DESC"
         parameters = () if limit is None else (limit,)
         if limit is not None: query += " LIMIT ?"
         with self.lock: return [json.loads(r[0]) for r in self.db.execute(query, parameters)]
@@ -73,7 +75,7 @@ class ModalStore(Store):
         with self.lock:
             self.records.put('run:'+run['id'], json.dumps(run))
             latest = self.records.get('meta:latest')
-            if not latest or run['created_at'] > latest['created_at']:
+            if not run.get('parent_id') and (not latest or run['created_at'] > latest['created_at']):
                 self.records.put('meta:latest', {k: run[k] for k in ('id', 'created_at')})
 
     def get_run(self, run_id):
@@ -81,10 +83,10 @@ class ModalStore(Store):
             raw = self.records.get('run:'+run_id)
             return json.loads(raw) if raw else None
 
-    def runs(self, *, limit=30):
+    def runs(self, *, limit=30, include_children=False):
         with self.lock:
             runs = [json.loads(value) for key, value in self.records.items() if key.startswith('run:')]
-            return sorted(runs, key=lambda r: r['created_at'], reverse=True)[:limit]
+            return sorted((r for r in runs if include_children or not r.get('parent_id')), key=lambda r: r['created_at'], reverse=True)[:limit]
 
     def latest(self):
         with self.lock:

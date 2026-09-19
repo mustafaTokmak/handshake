@@ -14,9 +14,10 @@ from opentelemetry import trace
 from pydantic import BaseModel, Field, ValidationError
 from .agent import propose, INSTRUCTIONS
 from .carriers import CARRIERS, BY_ID, LEGACY_SOURCE, contact_context
-from .models import Quote
+from .models import Quote, StartRequest
 from .sandbox import validate_patch
 from .store import now
+from .experiments import Experiments
 
 
 class LegacyResponse(BaseModel):
@@ -39,12 +40,19 @@ def fingerprint():
     return h.hexdigest()
 
 
-class Coordinator:
+class Coordinator(Experiments):
     def __init__(self, store):
         self.store = store; self.active = set(); self.lock = threading.RLock()
         self.workers = {}; self.interrupting = False
         # A crashed process cannot leave a run silently marked as actively repairing.
-        for run in store.runs(limit=None):
+        for run in store.runs(limit=None, include_children=True):
+            if run.get('suite', {}).get('status') == 'running':
+                run['suite']['status'] = 'interrupted'
+                for case in run['suite']['cases']:
+                    if case['status'] == 'running': case['status'] = 'interrupted'
+                    elif case['status'] == 'queued': case['status'] = 'skipped'
+                store.save_run(run)
+            if run.get("suite"): continue  # Child runs own repair and incident recovery.
             for cid, state in run["carriers"].items():
                 if state["status"] in ("loading", "repairing", "resuming"):
                     status = "interrupted"
@@ -106,9 +114,10 @@ class Coordinator:
                 return run
             return self._start(request)
 
-    def _start(self, request, ready=False):
+    def _start(self, request, ready=False, parent_id=None, route=None):
         run_id = uuid.uuid4().hex
-        run = {"id": run_id, "created_at": now(), "order": request.order.model_dump(), "condition": request.condition, "attack": request.attack, "implementation_sha256": fingerprint(), "agent_prompt_sha256": hashlib.sha256(INSTRUCTIONS.encode()).hexdigest(), "route": os.getenv("REPAIR_GATEWAY_ROUTE", "repair-lab"), "model": os.getenv("HANDSHAKE_MODEL"), "remote_state_verified": False, "events": [], "carriers": {c["id"]: {"status": "loading", "quote": None, "attempts": [], "source": LEGACY_SOURCE, "incident_id": None} for c in CARRIERS}}
+        run = {"id": run_id, "created_at": now(), "order": request.order.model_dump(), "condition": request.condition, "attack": request.attack, "implementation_sha256": fingerprint(), "agent_prompt_sha256": hashlib.sha256(INSTRUCTIONS.encode()).hexdigest(), "route": route or os.getenv("REPAIR_GATEWAY_ROUTE", "repair-lab"), "model": os.getenv("HANDSHAKE_MODEL"), "remote_state_verified": False, "events": [], "carriers": {c["id"]: {"status": "loading", "quote": None, "attempts": [], "source": LEGACY_SOURCE, "incident_id": None} for c in CARRIERS}}
+        if parent_id: run["parent_id"] = parent_id
         run["started_at"] = None if ready else now()
         if ready:
             for state in run["carriers"].values(): state["status"] = "ready"
@@ -135,6 +144,12 @@ class Coordinator:
             try: asyncio.run(controlled())
             except asyncio.CancelledError:
                 run = self.store.get_run(run_id)
+                if run.get('suite', {}).get('status') == 'running':
+                    run['suite']['status'] = 'interrupted'
+                    for case in run['suite']['cases']:
+                        if case['status'] == 'running': case['status'] = 'interrupted'
+                        elif case['status'] == 'queued': case['status'] = 'skipped'
+                    self.store.save_run(run)
                 for cid, state in run['carriers'].items():
                     if (key == 'all' or cid == key) and state['status'] in ('loading', 'repairing', 'resuming'):
                         for attempt in state['attempts']:
@@ -151,9 +166,11 @@ class Coordinator:
                     if (key == "all" or cid == key) and state["status"] in ("loading", "repairing", "resuming"):
                         self.store.update_carrier(run_id, cid, status="error", error=type(exc).__name__)
             finally:
-                with self.lock:
-                    self.active.discard((run_id, key)); self.workers.pop((run_id, key), None)
-                    control['done'].set()
+                try: self._update_suite_case(run_id)
+                finally:
+                    with self.lock:
+                        self.active.discard((run_id, key)); self.workers.pop((run_id, key), None)
+                        control['done'].set()
                 logfire.force_flush()
         threading.Thread(target=worker, daemon=True).start()
 
@@ -196,7 +213,7 @@ class Coordinator:
                     run = self.store.get_run(run_id); state = run["carriers"][cid]
                     prior = [{k:a[k] for k in ("hypothesis", "source", "validation") if k in a} for a in state["attempts"][-5:]]
                     event("investigating", {"attempt": phase_attempts+1, "context_available": bool(context)})
-                    candidate, usage = await propose(cid, run["order"], state.get("response"), state.get("error"), state["source"], prior, context, run["attack"], event)
+                    candidate, usage = await propose(cid, run["order"], state.get("response"), state.get("error"), state["source"], prior, context, run["attack"], event, route=run["route"])
                     proposals += 1; digest = code_hash(candidate.source)
                     if digest in seen:
                         event("duplicate_proposal", {"code_sha256": digest})

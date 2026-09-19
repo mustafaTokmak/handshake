@@ -41,7 +41,7 @@ def documentation_result(document, url):
     )
 
 
-def gateway_model(event=None):
+def gateway_model(event=None, route=None):
     for cls in (ChatCompletion, _ChatCompletion):
         if "metadata" in cls.model_fields:
             cls.model_fields["metadata"].annotation = dict[str, Any] | None
@@ -56,14 +56,14 @@ def gateway_model(event=None):
                 "optimizations": response.headers.get("x-pydantic-gateway-optimizations-applied"),
             })
     http_client = httpx.AsyncClient(event_hooks={"response": [record_gateway_response]}, timeout=120)
-    provider = gateway_provider("openai-chat", route=os.getenv("REPAIR_GATEWAY_ROUTE", "repair-lab"), api_key=key, http_client=http_client)
+    provider = gateway_provider("openai-chat", route=route or os.getenv("REPAIR_GATEWAY_ROUTE", "repair-lab"), api_key=key, http_client=http_client)
     provider.client.max_retries = 0
     provider.client.timeout = 120
     return OpenAIChatModel(os.getenv("HANDSHAKE_MODEL", "google/gemma-4-31B-it"), provider=provider, profile=OpenAIModelProfile(openai_supports_tool_choice_required=False))
 
 
-async def propose(carrier_id, order, response, error, source, attempts, context, attack, event):
-    model = gateway_model(event); usage = RunUsage(); deps = Evidence(carrier_id, attack, event)
+async def propose(carrier_id, order, response, error, source, attempts, context, attack, event, route=None):
+    model = gateway_model(event, route); usage = RunUsage(); deps = Evidence(carrier_id, attack, event)
     agent = Agent(model, deps_type=Evidence, output_type=Candidate, instructions=INSTRUCTIONS, retries=1)
     @agent.tool
     async def read_carrier_documentation(ctx: RunContext[Evidence]) -> ToolReturn:
