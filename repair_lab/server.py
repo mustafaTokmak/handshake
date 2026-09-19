@@ -38,7 +38,7 @@ def create_server(port=8780, state_dir=Path('state'), host='127.0.0.1', store=No
                 if parts[2] == 'api-doc': return self.send(200, doc_record(parts[1], attack))
                 html = doc_html(parts[1], attack).replace('href="/api-doc?', f'href="/carriers/{parts[1]}/api-doc?')
                 return self.send(200, html.encode(), 'text/html; charset=utf-8')
-            if path == '/api/runs': return self.send(200, [{k:r[k] for k in ('id', 'created_at', 'condition', 'order', 'carriers')} for r in store.runs()])
+            if path == '/api/runs': return self.send(200, [{k:r[k] for k in ('id', 'created_at', 'condition', 'order', 'carriers')} | {'started_at': r.get('started_at')} for r in store.runs()])
             if path == '/api/latest': return self.send(200, store.latest())
             if path.startswith('/api/runs/'):
                 r = store.get_run(path.rsplit('/', 1)[-1]); return self.send(200 if r else 404, r or {'error': 'Run not found'})

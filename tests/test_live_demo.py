@@ -41,6 +41,7 @@ class SharedDemo(unittest.TestCase):
         self.server.coordinator.store.update_carrier(first['id'], 'cedar', status='restored', source='old patch', quote={'amount_minor': 1})
         status, fresh = self.request('POST', '/api/sessions', {})
         self.assertEqual(status, 201); self.assertNotEqual(first['id'], fresh['id'])
+        self.assertIsNone(fresh['started_at'])
         self.assertEqual(self.request('GET', '/api/latest')[1]['id'], fresh['id'])
         self.assertEqual(fresh['order']['weight_kg'], 2.4)
         self.assertEqual(fresh['events'], [])
@@ -53,7 +54,11 @@ class SharedDemo(unittest.TestCase):
     def test_session_starts_once_and_reset_cannot_interrupt_active_work(self):
         _, session = self.request('POST', '/api/sessions', {})
         path = '/api/sessions/'+session['id']+'/start'
-        self.assertEqual(self.request('POST', path, StartRequest().model_dump())[0], 202)
+        status, started = self.request('POST', path, StartRequest().model_dump())
+        self.assertEqual(status, 202)
+        self.assertIsNotNone(started['started_at'])
+        self.assertGreaterEqual(started['started_at'], session['created_at'])
+        self.assertEqual(self.request('GET', '/api/runs')[1][0]['started_at'], started['started_at'])
         self.assertEqual(self.request('POST', path, {})[0], 400)
         self.server.coordinator.active.add((session['id'], 'all'))
         self.assertEqual(self.request('POST', '/api/sessions', {})[0], 400)

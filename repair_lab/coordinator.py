@@ -99,7 +99,7 @@ class Coordinator:
                     raise ValueError("This session has already started; create a new test session")
                 if self.store.latest()["id"] != session_id:
                     raise ValueError("A newer shared session exists; refresh before starting")
-                run.update(order=request.order.model_dump(), condition=request.condition, attack=request.attack)
+                run.update(order=request.order.model_dump(), condition=request.condition, attack=request.attack, started_at=now())
                 for state in run["carriers"].values(): state["status"] = "loading"
                 self.store.save_run(run)
                 self._launch(session_id, "all", self._initial(session_id))
@@ -109,6 +109,7 @@ class Coordinator:
     def _start(self, request, ready=False):
         run_id = uuid.uuid4().hex
         run = {"id": run_id, "created_at": now(), "order": request.order.model_dump(), "condition": request.condition, "attack": request.attack, "implementation_sha256": fingerprint(), "agent_prompt_sha256": hashlib.sha256(INSTRUCTIONS.encode()).hexdigest(), "route": os.getenv("REPAIR_GATEWAY_ROUTE", "repair-lab"), "model": os.getenv("HANDSHAKE_MODEL"), "remote_state_verified": False, "events": [], "carriers": {c["id"]: {"status": "loading", "quote": None, "attempts": [], "source": LEGACY_SOURCE, "incident_id": None} for c in CARRIERS}}
+        run["started_at"] = None if ready else now()
         if ready:
             for state in run["carriers"].values(): state["status"] = "ready"
         self.store.save_run(run)
