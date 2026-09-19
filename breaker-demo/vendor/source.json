@@ -1,0 +1,8 @@
+{
+  "repository": "https://github.com/mustafaTokmak/transactbench",
+  "revision": "2de5bb380f5c5ed1c7ebcc1497faf7f92be032aa",
+  "copied_files": [
+    "txn_harness.py"
+  ],
+  "purpose": "Local minimal fork for an isolated Breaker demonstration"
+}

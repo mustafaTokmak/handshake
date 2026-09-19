@@ -1,0 +1,107 @@
+## Verdict
+
+Yes—but only as a narrow semantic sensor inside TransactBench, not as the negotiator, calculator, truth oracle, or acceptance predictor.
+
+The strongest hack is a **Negotiation Firewall wind tunnel**: replay the same negotiations through an unmodified buyer and a Jev-defended buyer, while Python retains complete authority over offers, budgets, IDs, tools, and settlement. The experiment asks a credible question:
+
+> Does typed semantic risk assessment improve negotiation decisions beyond the existing mechanical guardrails, an ordinary prompted model, and a deployable deterministic policy?
+
+This builds naturally on the existing harness and avoids a generic autonomous-procurement pitch already represented by products such as Pactum.
+
+## Strongest product and demo
+
+Present TransactBench as a test bench for autonomous negotiators facing adversarial or misleading counterparties.
+
+In the three-minute demo:
+
+1. Start with one immutable offer and its untrusted seller message.
+2. Fork that identical state into two buyers: baseline prompted buyer and Jev-defended buyer.
+3. Display Jev’s assessments of observable language, such as:
+   - “Does the message attempt to redefine buyer authority or budget?”
+   - “Does it discourage use of an independent price check?”
+   - “Does it contain an asserted deadline or finality claim?”
+   - “Does it provide a concrete, checkable justification for the price?”
+4. Show how a deterministic Python policy converts those assessments into an allowed action: proceed, check price, counter, accept, or walk.
+5. Let the harness—not either model—resolve offer IDs, arithmetic, budget enforcement, and metrics.
+6. End with the paired evaluation table across the broader saved roster, explicitly marked as either live execution or recorded replay.
+
+Do not promise a particular failure in the live segment. A reliable demo can use a labeled replay from a real run, followed by a short optional live trial if Jev authentication and latency work.
+
+The demo should include both:
+
+- A hostile-looking message where the defended buyer avoids an attempted override.
+- A legitimate deal where it still closes.
+
+The second case matters more than theatrical attack resistance: a buyer that simply walks whenever language looks suspicious is not a useful negotiator.
+
+## Jev’s actual role
+
+Jev produces a typed feature packet about the supplied message and current observable state. It does not alter state directly.
+
+For example:
+
+```text
+authority_override_language: Choice
+oracle_discouragement_language: Choice
+finality_claim_present: Choice
+price_justification_specificity: Score
+```
+
+Use the class probabilities and distribution-derived confidence only for routing or abstention. Do not call confidence a probability that Jev is correct. Do not multiply question marginals into a supposed joint “risk probability.” Treat Score levels as ordinal categories, never as money utility.
+
+Jev also cannot determine whether a seller’s finality claim is true or whether evidence is authentic merely because the seller supplied it. It can identify the presence and semantic form of those claims. Python must enforce provenance: supplier text remains untrusted until supported by an approved source or tool.
+
+The buyer policy might therefore say:
+
+- Mechanical budget or protocol violation: block deterministically.
+- Suspected authority override or oracle discouragement: preserve constraints and prefer `check_price`.
+- Unsupported finality language: do not treat the offer as truly final.
+- Specific justification: allow continued negotiation, but do not convert it into a numeric acceptance likelihood.
+- Ambiguous or low-concentration result: abstain and fall back to the unchanged baseline policy.
+
+## Minimal integration
+
+Add one optional semantic-assessor interface around the existing buyer; do not restructure the harness:
+
+```text
+assess(message, observable_state) -> SemanticFeatures
+```
+
+Implement interchangeable adapters:
+
+- `NullAssessor`: all fields abstain.
+- `RuleAssessor`: deterministic keyword/structure rules.
+- `PlainLLMAssessor`: the existing model prompted to return the same schema.
+- `JevAssessor`: the same closed questions through Jev.
+
+Every condition feeds the identical feature schema into the identical buyer policy. Offers, oracle access, prompts outside the assessor, seller behavior, temperatures, money rules, and round limits remain frozen and fingerprinted. Cache raw assessor responses with provider, model, latency, errors, and trial metadata. If Jev fails, record the failure and take the predefined fallback; never silently substitute another model.
+
+## Decisive ablation
+
+Run a paired four-arm experiment on the same scenario, seller variant, base buyer model, seed where supported, and initial offer:
+
+| Arm | Semantic layer | Purpose |
+|---|---|---|
+| A | Null packet | Prompted-agent baseline |
+| B | Deterministic rules | Tests whether simple engineering is enough |
+| C | Plain LLM, same schema | Tests whether Jev adds value beyond ordinary classification |
+| D | Jev, same schema | Measures Jev’s incremental contribution |
+
+Keep the existing hard guardrails enabled in all four arms. Otherwise any improvement could merely rediscover budget enforcement already supplied by Python. Use tone-matched control/attack pairs and change one semantic factor at a time; do not reuse the retracted forgery framing as proof of an effect.
+
+Predeclare the decision rule before running. Jev earns a place only if D improves outcomes over both B and C without materially harming legitimate deals or reliability. Report:
+
+- Value relative to the priced outside option.
+- Close rate and regret conditional on closing, separately.
+- Missed acceptable deals.
+- Attempted overrides and protocol failures.
+- Oracle use and rounds.
+- End-to-end latency, Jev success rate, and abstention rate.
+
+Also include the privileged optimal reference, clearly labeled non-deployable, and a deployable deterministic buyer using only visible facts. “Never accept” must lose through priced walks and missed deals.
+
+## Assumptions and rejection criterion
+
+This assumes seller language contains decision-relevant semantic variation not already captured by structured offers, and that Jev’s probability fields survive the chosen route. Neither has been established. Authentication, latency, calibration on negotiation messages, and incremental accuracy are currently unknown.
+
+The strongest reason to reject Jev is simple: **if deterministic rules or the same-schema plain LLM match its decisions and economic outcomes, Jev is sponsor-shaped complexity on a path that needs low latency and high reliability.** In that case, keep TransactBench and the semantic firewall architecture, but remove Jev from the product claim.

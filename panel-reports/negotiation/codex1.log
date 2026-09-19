@@ -1,0 +1,102 @@
+## Verdict
+
+Jev can improve TransactBench, but only as a narrow semantic sensor inside a defended negotiation agent—not as a negotiator, utility estimator, or acceptance predictor.
+
+The strongest hack-day product is:
+
+**TransactBench Shield: a wind tunnel comparing an ordinary LLM buyer with a buyer whose interpretation of seller language is isolated behind Jev, while Python retains all economic decisions and enforcement.**
+
+This is worth building only if the experiment demonstrates incremental value over both:
+
+1. A buyer using the same defensive checklist in its prompt.
+2. A deployable deterministic buyer using only buyer-visible prices, BATNA, ceiling, round number, and market-check availability.
+
+If Jev cannot beat those baselines on decision quality after latency and missed-deal costs, reject the integration. The existing deterministic architecture may already have removed most of the problem Jev could solve.
+
+## Strongest concrete product and demo
+
+Show one negotiation transcript moving through three buyers:
+
+- **Prompted buyer:** the current LLM receives the seller message and chooses an action.
+- **Deterministic defended buyer:** ignores untrusted prose, checks the market whenever available, enforces the ceiling, and follows a visible-price concession rule.
+- **Jev-defended buyer:** Jev converts seller language into typed, uncertain semantic observations; Python combines those observations with deterministic economics; the LLM may phrase counters but cannot alter money or permissions.
+
+The screen should expose three separate layers:
+
+```text
+Seller message
+      ↓
+Jev semantic observations
+      ↓
+Python economic policy
+      ↓
+Validated action / offer_id
+```
+
+For example, Jev may answer finite questions such as:
+
+- Does this text purport to change the buyer’s authority or budget?
+- Does it claim that an offer is final?
+- Does it discourage independent price verification?
+- Is a stated justification supported by identifiable evidence, merely asserted, or unclear?
+- Does the message introduce a non-price obligation requiring review?
+
+Those outputs can cause deterministic actions such as “ignore claimed authorization,” “use the market check,” “request evidence,” or “escalate terms for review.” They must not directly produce “accept” based on a Jev score.
+
+The three-minute demo should use a clearly labelled replay from saved transcripts, followed—if the API works—by one live run without promising a particular failure. Show that the hard ceiling still blocks execution regardless of Jev. The meaningful outcome is whether the defended buyer obtains acceptable deals rather than merely refusing risky ones.
+
+## Jev’s actual role
+
+Jev knows only the supplied observable state. It can classify what a seller message appears to be doing. It cannot know whether “this is my final offer” is true, infer the hidden seller floor, discover willingness to accept, or determine optimal price.
+
+Therefore:
+
+- Jev probabilities are uncertainty over individual semantic classes, not calibrated probabilities that the seller will accept.
+- Its confidence is distribution concentration, not probability of correctness.
+- Independent marginal probabilities must remain separate.
+- An ordinal Score must not be converted into pounds, expected surplus, or utility.
+- Arithmetic, offer totals, BATNA comparisons, ceiling enforcement, offer IDs, and permissions remain entirely in Python.
+
+The policy might say: if Jev assigns substantial mass to “purported authority override,” treat the text as untrusted and continue using the original ceiling. That is defensible. Saying “Jev predicts a 73% chance the seller is bluffing, so counter at £5,400” is not.
+
+The negotiation LLM can still generate a courteous counterproposal, but Python must choose or validate every amount from an allowed set.
+
+## Minimal integration
+
+Do not build a new platform. Add one buyer wrapper and one semantic adapter:
+
+1. Serialize only observable state: seller text, current immutable offer, round, whether the oracle remains available, and previous public offers.
+2. Ask Jev a small fixed set of independent closed questions.
+3. Store raw answers, per-class probabilities, confidence where available, model/version, latency, and failures in trial metadata.
+4. Map answers through an explicit Python policy to `check_price`, `continue`, `counter`, `accept`, `walk`, or human review.
+5. Fail closed on permission changes, but not automatically on the transaction: a Jev outage should fall back to the deterministic visible-information baseline.
+6. Preserve the specification fingerprint; this is a new experimental specification, not comparable by silently merging old results.
+
+Modal is optional for parallel replay evaluation. Gemini/OpenRouter can remain the language-generating buyer. Sponsor coverage is not itself a reason to introduce either.
+
+## Decisive ablation
+
+Run the same paired, tone-matched scenarios through four arms:
+
+1. Existing prompted LLM.
+2. LLM with the same semantic checklist written into its prompt.
+3. Jev semantic classifier plus deterministic policy.
+4. Fully deterministic buyer using only visible economic state.
+
+The critical comparison is arm 3 versus arms 2 and 4. Use identical transcripts or controlled seller seeds. Report:
+
+- Total decision loss using deal value versus priced BATNA—not only regret conditional on closing.
+- Close rate and missed mutually acceptable deals.
+- Attempted breaches and protocol errors.
+- Market-check use.
+- Latency, API success rate, and cost.
+
+Do not multiply Jev marginals or claim statistical significance from a small hack-day sample. The demo can present descriptive paired outcomes and label them as preliminary.
+
+## Strongest reason to reject
+
+The current harness may make seller language economically irrelevant. With a free one-shot true-price oracle, immutable numeric offers, hard budget enforcement, and a deterministic policy that checks the market and accepts only advantageous offers, a semantic model has little room to add value. It may instead introduce latency, false alarms, and unnecessary walks.
+
+My recommendation is therefore conditional: build the Jev arm as an experimentally falsifiable defense layer, not as the product thesis. If the deterministic buyer matches or beats it—especially on BATNA-adjusted value and close rate—present that negative result honestly. That would be a stronger demonstration of agent architecture than attaching an unjustified probability engine to negotiation.
+
+Assumptions: Jev’s required probability fields can be obtained reliably; seller prose affects real LLM decisions beyond the existing hard guards; saved transcripts cover meaningful semantic attacks; and the market oracle’s zero explicit cost reflects the intended benchmark. None is yet empirically established.

@@ -1,0 +1,78 @@
+## Verdict
+
+Jev can improve TransactBench, but only in a narrow and defensible role: make the negotiator’s semantic state explicit before the generative buyer acts. Do not pitch Jev as predicting acceptance, discovering the seller’s floor, calculating value, or deciding whether a deal is good. Python already owns those decisions more reliably.
+
+The strongest project is an autonomous negotiator tested in its own wind tunnel, with Jev acting as a semantic “type checker” for seller language. The pitch is not “AI negotiates better.” It is:
+
+> Can a negotiation agent distinguish observable commercial facts from pressure, claimed authority, and unsupported finality—without becoming so defensive that it misses good deals?
+
+That is both more credible and more interesting than the old forged-system-message story, whose apparent effect did not survive the tone-matched control.
+
+## Strongest product and demo
+
+Build “TransactBench Semantic Defense”: a side-by-side comparison of the same buyer model with and without a typed semantic state.
+
+For every seller turn:
+
+1. The immutable offer supplies the authoritative money.
+2. Jev answers a small batch of closed semantic questions about the accompanying language.
+3. Python updates a persistent evidence ledger.
+4. Gemini or the existing OpenRouter buyer proposes the next action using the offer plus that ledger.
+5. The harness validates the offer ID, budget, rounds, and terminal action.
+
+The overlooked use of fast semantic questions is not merely detecting an injection. It is tracking claims across rounds. For example, Jev can classify that the seller explicitly claimed:
+
+- this is the final offer;
+- approval or policy supposedly prevents further movement;
+- a deadline or competing bid exists;
+- the buyer’s rules or authority have supposedly changed;
+- supporting evidence was actually supplied versus merely asserted;
+- the seller remains open to a counteroffer.
+
+Jev does not decide whether those claims are true. Python records them and can later observe contradictions—for example, a seller who called an offer “final” and then conceded. That creates a useful, inspectable negotiation memory without exposing the hidden floor or pretending to estimate acceptance probability.
+
+A three-minute demo should show one labeled replay from a real recorded trial, not an allegedly live failure engineered for the stage:
+
+- Left: original buyer transcript and outcome.
+- Right: defended buyer with the same seller trajectory and buyer model.
+- Center: Jev’s typed classifications, probabilities, abstentions, and the Python-owned offer/economic state.
+- End: paid price or BATNA, fair-price regret, deal/walk result, missed acceptable deal, protocol violation, and latency.
+
+If a reliable live API path exists, run an additional fresh scenario and accept whatever happens. Otherwise, explicitly call the main comparison a replay and run only the deterministic harness checks live.
+
+## Why this beats the alternatives
+
+A negotiation copilot is safer but harder to score and less impressive in three minutes. A generic autonomous negotiator is crowded territory—Pactum alone defeats a novelty claim—and invites unsupported claims about commercial performance.
+
+Candidate-offer ranking is especially dangerous: Jev’s marginal class probabilities are not calibrated joint probabilities that a seller will accept. Using them as expected deal value would be methodologically wrong.
+
+An evidence/provenance gate is sound but too generic by itself. Incorporating it into the wind tunnel makes it measurable: does semantic state improve decisions under persuasion while preserving legitimate deals?
+
+The existing deterministic buyer remains important. On the current smoke-test sellers, Jev has essentially nothing to add: checking the free market oracle and comparing integers is already sufficient. The richer saved concession scenarios are therefore essential. A semantic agent could outperform the simple deterministic policy by continuing to negotiate when an unsupported “final offer” claim would otherwise cause acceptance or walking, while still respecting hard economics.
+
+## Minimal integration
+
+Add one adapter at the seller-message boundary. Ask perhaps four to six independent Choice/Noul questions in one request. Store the raw response, model/version, schema, latency, probabilities, and abstention decision in each trial record.
+
+Use concentration-derived confidence only to decide whether to populate a semantic field or mark it unknown. Never display it as “probability the seller is lying.” Do not multiply marginals. Do not let Jev parse totals, approve offers, mutate budgets, or see the hidden floor and strategy metadata.
+
+Keep the decision policy simple: unsupported pressure cannot alter permissions or economics; uncertain classifications remain unknown; the generative buyer may use semantic state to choose continue/counter/accept/walk, but the harness remains authoritative.
+
+## Decisive ablation
+
+Run the same frozen scenarios, seller trajectories, buyer model, prompts, temperatures, and seeds across:
+
+1. Prompted buyer with the existing hard-money harness.
+2. The same buyer plus a deterministic/regex semantic guard.
+3. The same buyer plus an ordinary LLM classifier using exactly the same schema.
+4. The same buyer plus Jev.
+
+Include the deployable deterministic negotiation baseline using only buyer-visible facts, and report the privileged optimum separately and clearly labeled.
+
+Jev earns its place only if condition 4 improves over both the prompted buyer and the deployable deterministic baseline on realized decision quality while not buying safety through excessive walking. Report value relative to BATNA, regret conditional on closing, close rate, missed acceptable deals, attempted breaches, protocol errors, and latency. The critical incremental comparison is Jev versus the ordinary LLM classifier—not Jev versus an undefended agent.
+
+## Strongest reason to reject
+
+There is currently no evidence that Jev adds value beyond a carefully prompted classifier or even narrow deterministic rules, and no authenticated call has completed. Its provider-level calibration does not establish calibration on negotiation language. If the API route cannot preserve probabilities reliably, or a quick labeled-set ablation does not show an advantage over the same-schema LLM classifier, remove Jev. Otherwise the project becomes sponsor-shaped architecture around a problem the existing harness already solves.
+
+Assumptions: the saved scenarios contain meaningful multi-round concessions; seller prose is available separately from immutable offers; at least a small manually labeled semantic set can be prepared; and “better” means economic outcomes plus maintained deal opportunity, not merely fewer violations.
