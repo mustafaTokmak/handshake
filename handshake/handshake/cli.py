@@ -10,13 +10,14 @@ from dotenv import dotenv_values
 from pydantic_ai import Agent
 
 from .agent import gateway_model
+from .attacks import NAMES
 from .runner import atomic_json, batch, compare, configure_tracing, run_scenario
 
 PROJECT = Path(__file__).resolve().parent.parent
 
 
 def settings_status():
-    return {"gateway_key": bool(os.getenv("PYDANTIC_AI_GATEWAY_API_KEY")), "model": os.getenv("HANDSHAKE_MODEL") or None, "route": os.getenv("HANDSHAKE_GATEWAY_ROUTE", "modal"), "logfire_token": bool(os.getenv("LOGFIRE_TOKEN")), "policy_reference": os.getenv("HANDSHAKE_GATEWAY_POLICY_REFERENCE") or None, "modal_auth": bool((os.getenv("MODAL_TOKEN_ID") and os.getenv("MODAL_TOKEN_SECRET")) or (Path.home()/".modal.toml").exists())}
+    return {"gateway_key": bool(os.getenv("PYDANTIC_AI_GATEWAY_API_KEY")), "model": os.getenv("HANDSHAKE_MODEL") or None, "route": os.getenv("HANDSHAKE_GATEWAY_ROUTE", "modal"), "logfire_token": bool(os.getenv("LOGFIRE_TOKEN")), "policy_reference": os.getenv("HANDSHAKE_GATEWAY_POLICY_REFERENCE") or None, "guardrail_reference": os.getenv("HANDSHAKE_GATEWAY_GUARDRAIL_REFERENCE") or None, "guardrail_action": os.getenv("HANDSHAKE_GATEWAY_GUARDRAIL_ACTION") or None, "modal_auth": bool((os.getenv("MODAL_TOKEN_ID") and os.getenv("MODAL_TOKEN_SECRET")) or (Path.home()/".modal.toml").exists())}
 
 
 async def warmup(condition, results_dir):
@@ -56,6 +57,8 @@ def main():
             item.add_argument("--trials", type=int, default=5)
         if not item.prog.endswith("warmup"):
             item.add_argument("--backend", choices=["local", "modal"], default="local")
+            item.add_argument("--attack", choices=list(NAMES), default=None, help="Inject a red-team payload into the provider's free-text detail field")
+            item.add_argument("--no-guardrail", action="store_true", help="Disable the toolset guardrail; use for the failing baseline arm")
     compare_parser = commands.add_parser("compare")
     compare_parser.add_argument("--experiment", required=True)
     args = parser.parse_args()
@@ -69,9 +72,9 @@ def main():
             serve(args.port, args.results_dir)
             return
         if args.command == "run":
-            result = asyncio.run(run_scenario(args.scenario, args.mode, args.condition, args.backend, args.results_dir))
+            result = asyncio.run(run_scenario(args.scenario, args.mode, args.condition, args.backend, args.results_dir, attack=args.attack, guardrail=not args.no_guardrail))
         elif args.command == "batch":
-            result = asyncio.run(batch(args.condition, args.experiment, args.trials, args.backend, args.results_dir))
+            result = asyncio.run(batch(args.condition, args.experiment, args.trials, args.backend, args.results_dir, attack=args.attack, guardrail=not args.no_guardrail))
         elif args.command == "warmup":
             result = asyncio.run(warmup(args.condition, args.results_dir))
         else:

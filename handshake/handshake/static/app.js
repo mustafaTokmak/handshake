@@ -27,7 +27,22 @@ function show(run) {
   if (run.trace_url) {const url = new URL(run.trace_url); if (url.protocol === 'https:') {$('trace').href = url.href; $('trace').hidden = false;}}
   $('trace-note').textContent = run.mode === 'rehearsal' ? 'Reference execution only. No model or Gateway rule was used.' : (run.trace_id ? 'Trace captured. Verify remote rule application in the Gateway Usage chart.' : 'Logfire trace unavailable. This run is not submission-ready.');
 }
+async function refreshComparison() {
+  const comparisons = await api('/api/comparisons');
+  $('comparison-panel').hidden = !comparisons.length;
+  if (!comparisons.length) return;
+  const comparison = comparisons[0];
+  $('experiment').textContent = comparison.experiment;
+  $('comparison-note').textContent = comparison.note;
+  $('comparison').replaceChildren();
+  for (const group of comparison.groups) {
+    const row = document.createElement('tr');
+    for (const value of [names[group.scenario], group.condition === 'on' ? 'Enabled' : 'Disabled', `${group.passed} / ${group.trials}`, group.errors, group.duplicate_count, group.tool_calls, group.output_tokens, (group.mean_scenario_ms / 1000).toFixed(2) + 's']) row.append(make('td', value));
+    $('comparison').append(row);
+  }
+}
 async function refresh() {
+  await refreshComparison();
   runs = await api('/api/runs'); $('history').replaceChildren();
   for (const run of runs) {
     const tr = document.createElement('tr');

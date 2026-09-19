@@ -13,6 +13,7 @@ from pydantic_ai import capture_run_messages
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 from .agent import BASE_INSTRUCTIONS, ToolClient, live_recovery, rehearsal_recovery
+from .attacks import NAMES
 from .provider import CONTRACT
 from .transport import LocalTransport, ModalTransport
 
@@ -34,15 +35,17 @@ def atomic_json(path: Path, value):
 def implementation_fingerprint():
     package = Path(__file__).parent
     digest = hashlib.sha256()
-    for name in ("agent.py", "models.py", "provider.py", "transport.py", "worker.py", "runner.py"):
+    for name in ("agent.py", "attacks.py", "models.py", "provider.py", "transport.py", "worker.py", "runner.py"):
         digest.update(name.encode())
         digest.update((package/name).read_bytes())
     return digest.hexdigest()
 
 
-async def run_scenario(scenario="accepted", mode="rehearsal", condition="off", backend="local", results_dir=Path("results"), request_key=None):
+async def run_scenario(scenario="accepted", mode="rehearsal", condition="off", backend="local", results_dir=Path("results"), request_key=None, attack=None, guardrail=True):
     if scenario not in ("accepted", "not_accepted", "pending", "unavailable") or mode not in ("rehearsal", "live") or condition not in ("off", "on") or backend not in ("local", "modal"):
         raise ValueError("Invalid run configuration")
+    if attack is not None and attack not in NAMES:
+        raise ValueError("Unknown attack")
     if mode == "rehearsal" and condition != "off":
         raise ValueError("Rehearsals have no Gateway condition and cannot simulate rule-on results")
     if mode == "live":
@@ -55,12 +58,12 @@ async def run_scenario(scenario="accepted", mode="rehearsal", condition="off", b
     order_id = "ORDER-1042"
     directory = Path(results_dir)/run_id
     directory.mkdir(parents=True)
-    record = {"run_id": run_id, "created_at": datetime.now(timezone.utc).isoformat(), "scenario": scenario, "mode": mode, "condition": condition if mode == "live" else "not_applicable", "backend": backend, "order_id": order_id, "request_key": request_key, "status": "starting", "model": os.getenv("HANDSHAKE_MODEL") if mode == "live" else None, "gateway_route": os.getenv("HANDSHAKE_GATEWAY_ROUTE", "modal"), "gateway_base_url": os.getenv("PYDANTIC_AI_GATEWAY_BASE_URL"), "policy_reference": os.getenv("HANDSHAKE_GATEWAY_POLICY_REFERENCE") if mode == "live" and condition == "on" else None, "gateway_policy_verified": False, "prompt_sha256": hashlib.sha256(BASE_INSTRUCTIONS.encode()).hexdigest(), "contract_sha256": hashlib.sha256(CONTRACT.encode()).hexdigest(), "usage": None, "trace_id": None, "trace_url": None}
+    record = {"run_id": run_id, "created_at": datetime.now(timezone.utc).isoformat(), "scenario": scenario, "mode": mode, "condition": condition if mode == "live" else "not_applicable", "backend": backend, "attack": attack, "guardrail": guardrail if mode == "live" else "not_applicable", "order_id": order_id, "request_key": request_key, "status": "starting", "model": os.getenv("HANDSHAKE_MODEL") if mode == "live" else None, "gateway_route": os.getenv("HANDSHAKE_GATEWAY_ROUTE", "modal"), "gateway_base_url": os.getenv("PYDANTIC_AI_GATEWAY_BASE_URL"), "policy_reference": os.getenv("HANDSHAKE_GATEWAY_POLICY_REFERENCE") if mode == "live" and condition == "on" else None, "gateway_policy_verified": False, "guardrail_reference": os.getenv("HANDSHAKE_GATEWAY_GUARDRAIL_REFERENCE") or None, "gateway_guardrail_action": os.getenv("HANDSHAKE_GATEWAY_GUARDRAIL_ACTION") or None, "gateway_guardrail_verified": False, "prompt_sha256": hashlib.sha256(BASE_INSTRUCTIONS.encode()).hexdigest(), "contract_sha256": hashlib.sha256(CONTRACT.encode()).hexdigest(), "usage": None, "trace_id": None, "trace_url": None}
     # Persist the original key before any create request can happen.
     record["implementation_sha256"] = implementation_fingerprint()
     atomic_json(directory/"run.json", record)
     transport = ModalTransport() if backend == "modal" else LocalTransport()
-    client = ToolClient(transport)
+    client = ToolClient(transport, order_id=order_id, request_key=request_key)
     start = time.perf_counter()
     with logfire.span("Handshake {scenario} {mode} {condition}", scenario=scenario, mode=mode, condition=condition, run_id=run_id):
         context = trace.get_current_span().get_span_context()
@@ -74,7 +77,7 @@ async def run_scenario(scenario="accepted", mode="rehearsal", condition="off", b
         initialized = False
         try:
             await transport.start()
-            await transport.rpc({"op": "initialize", "scenario": scenario})
+            await transport.rpc({"op": "initialize", "scenario": scenario, "attack": attack})
             initialized = True
             record["startup_ms"] = round((time.perf_counter()-start)*1000, 2)
             client.started = time.perf_counter()
@@ -84,7 +87,7 @@ async def run_scenario(scenario="accepted", mode="rehearsal", condition="off", b
             else:
                 with capture_run_messages() as messages:
                     try:
-                        outcome, record["usage"], _ = await live_recovery(client, order_id, request_key, timeout, condition)
+                        outcome, record["usage"], _ = await live_recovery(client, order_id, request_key, timeout, condition, guardrail)
                     finally:
                         (directory/"messages.json").write_bytes(ModelMessagesTypeAdapter.dump_json(messages, indent=2))
                         record["usage"] = client.model_usage
@@ -99,6 +102,8 @@ async def run_scenario(scenario="accepted", mode="rehearsal", condition="off", b
         finally:
             record["scenario_ms"] = round((time.perf_counter()-client.started)*1000, 2) if initialized else None
             record["events"] = client.events
+            record["blocked"] = client.blocked
+            record["flagged"] = client.flagged
             try:
                 if initialized:
                     record["evaluation"] = await transport.rpc({"op": "evaluate", "order_id": order_id, "request_key": request_key, "outcome": outcome.model_dump(mode="json") if outcome else None})
@@ -114,7 +119,7 @@ async def run_scenario(scenario="accepted", mode="rehearsal", condition="off", b
     return record
 
 
-async def batch(condition, experiment, trials=5, backend="local", results_dir=Path("results")):
+async def batch(condition, experiment, trials=5, backend="local", results_dir=Path("results"), attack=None, guardrail=True):
     if not 5 <= trials <= 50:
         raise ValueError("Use 5–50 exploratory trials per condition and case")
     if condition not in ("off", "on"):
@@ -124,8 +129,8 @@ async def batch(condition, experiment, trials=5, backend="local", results_dir=Pa
         for trial in range(trials):
             # Identical keys for paired conditions; always a fresh provider instance.
             key = "req-" + hashlib.sha256(f"{experiment}:{scenario}:{trial}".encode()).hexdigest()[:32]
-            runs.append(await run_scenario(scenario, "live", condition, backend, results_dir, key))
-    result = {"experiment": experiment, "condition": condition, "run_ids": [r["run_id"] for r in runs]}
+            runs.append(await run_scenario(scenario, "live", condition, backend, results_dir, key, attack, guardrail))
+    result = {"experiment": experiment, "condition": condition, "attack": attack, "guardrail": guardrail, "run_ids": [r["run_id"] for r in runs]}
     atomic_json(Path(results_dir)/f"batch-{uuid.uuid4().hex}.json", result)
     return result
 
