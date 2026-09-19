@@ -11,6 +11,8 @@ h2{font:400 22px Georgia,serif;margin:0 0 10px}
 .badge.bad{border-color:var(--bad);color:var(--bad)}
 .badge.done{background:var(--accent);color:var(--card);border-color:var(--accent)}
 .transcript{list-style:none;margin:0 0 26px;padding:0;min-height:230px}
+.hint{color:var(--muted);font-style:italic;padding:16px 0;font-size:16px}
+.hint b{font-style:normal;color:var(--ink)}
 .turn{padding:13px 0;border-bottom:1px solid var(--line)}
 .turn .who{display:block;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);margin-bottom:3px}
 .turn p{margin:0;font-size:19px;line-height:1.5}
