@@ -170,8 +170,8 @@ cp .env.example .env     # then fill in the keys
 ```
 
 `.env` is read by both processes: `repair_lab` loads it through python-dotenv, the
-caller through `caller/env.py`. They must agree on `CONTACT_CALLBACK_TOKEN` or the
-caller's relay is rejected with a 401.
+caller reads it itself at startup. They must agree on `CONTACT_CALLBACK_TOKEN` or
+the caller's relay is rejected with a 401.
 
 The lab needs a Pydantic AI Gateway key and Modal credentials to run repairs; the
 caller needs `GOOGLE_API_KEY`. Nothing is needed to watch the hosted demo.
