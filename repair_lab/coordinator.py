@@ -42,6 +42,7 @@ def fingerprint():
 class Coordinator:
     def __init__(self, store):
         self.store = store; self.active = set(); self.lock = threading.RLock()
+        self.workers = {}; self.interrupting = False
         # A crashed process cannot leave a run silently marked as actively repairing.
         for run in store.runs(limit=None):
             for cid, state in run["carriers"].items():
@@ -62,12 +63,35 @@ class Coordinator:
     def new_session(self):
         from .models import StartRequest
         with self.lock:
-            if self.active: raise ValueError("Wait for the active repair to finish before resetting the demo")
+            if self.active or self.interrupting: raise ValueError("Wait for the active repair to finish before resetting the demo")
             return self._start(StartRequest(condition="protected"), ready=True)
+
+    def interrupt_and_new_session(self):
+        with self.lock:
+            if self.interrupting: raise ValueError("Interruption is already in progress")
+            self.interrupting = True
+            workers = list(self.workers.values())
+            for control in workers:
+                if control['cancel'].is_set(): continue
+                control['cancel'].set()
+                if control.get('loop'):
+                    try: control['loop'].call_soon_threadsafe(control['task'].cancel)
+                    except RuntimeError: pass  # The worker has already closed its loop.
+        try:
+            # Cancellation unwinds the sandbox context before the next run exists.
+            for control in workers:
+                if not control['done'].wait(30):
+                    raise ValueError("Still closing the current sandbox; retry shortly")
+            with self.lock:
+                if self.active: raise ValueError("Current repair is still stopping")
+                from .models import StartRequest
+                return self._start(StartRequest(condition="protected"), ready=True)
+        finally:
+            with self.lock: self.interrupting = False
 
     def start(self, request, session_id=None):
         with self.lock:
-            if self.active:
+            if self.active or self.interrupting:
                 raise ValueError("A repair is already running")
             if session_id:
                 run = self.store.get_run(session_id)
@@ -96,15 +120,39 @@ class Coordinator:
             if (run_id, key) in self.active:
                 coroutine.close(); raise ValueError("Work already running")
             self.active.add((run_id, key))
+            control = {'cancel': threading.Event(), 'done': threading.Event()}
+            self.workers[(run_id, key)] = control
+        async def controlled():
+            with self.lock:
+                control.update(loop=asyncio.get_running_loop(), task=asyncio.current_task())
+                cancelled = control['cancel'].is_set()
+            if cancelled:
+                coroutine.close()
+                raise asyncio.CancelledError()
+            await coroutine
         def worker():
-            try: asyncio.run(coroutine)
+            try: asyncio.run(controlled())
+            except asyncio.CancelledError:
+                run = self.store.get_run(run_id)
+                for cid, state in run['carriers'].items():
+                    if (key == 'all' or cid == key) and state['status'] in ('loading', 'repairing', 'resuming'):
+                        for attempt in state['attempts']:
+                            if attempt['status'] == 'sandbox_running': attempt['status'] = 'interrupted'
+                        self.store.update_carrier(run_id, cid, status='interrupted', attempts=state['attempts'], error='Interrupted by presenter')
+                        if state.get('incident_id'):
+                            incident = self.store.incident(state['incident_id'])
+                            if incident:
+                                incident['status'] = 'interrupted'; self.store.save_incident(incident)
+                        self.store.event(run_id, cid, 'repair_interrupted', {'reason': 'Presenter started a fresh session'})
             except Exception as exc:
                 self.store.event(run_id, key, "worker_error", {"error": type(exc).__name__})
                 for cid, state in self.store.get_run(run_id)["carriers"].items():
                     if (key == "all" or cid == key) and state["status"] in ("loading", "repairing", "resuming"):
                         self.store.update_carrier(run_id, cid, status="error", error=type(exc).__name__)
             finally:
-                with self.lock: self.active.discard((run_id, key))
+                with self.lock:
+                    self.active.discard((run_id, key)); self.workers.pop((run_id, key), None)
+                    control['done'].set()
                 logfire.force_flush()
         threading.Thread(target=worker, daemon=True).start()
 
@@ -202,6 +250,7 @@ class Coordinator:
 
     def callback(self, incident_id, reply):
         with self.lock, self.store.lock:
+            if self.interrupting: raise ValueError("Current session is stopping")
             incident = self.store.incident(incident_id)
             if not incident: raise ValueError("Unknown incident")
             if any(m["message_id"] == reply.message_id for m in incident["messages"]): return {"accepted": True, "duplicate": True, "incident_id": incident_id}

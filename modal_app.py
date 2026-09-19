@@ -1,4 +1,4 @@
-"""Deploy the shared live demo with: uv run modal deploy modal_app.py."""
+"""Deploy the shared live demo with: uv run python modal_app.py (recreate strategy)."""
 from pathlib import Path
 import subprocess
 import modal
@@ -23,3 +23,8 @@ def live_demo():
     # One warm writer keeps shared state coherent and background repairs alive
     # between browser requests. GPU inference remains on the existing Gateway route.
     subprocess.Popen(['python', '-m', 'repair_lab.cli', '--host', '0.0.0.0', '--port', '8780'])
+
+
+if __name__ == "__main__":
+    with modal.enable_output():
+        app.deploy(strategy="recreate")

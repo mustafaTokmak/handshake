@@ -31,31 +31,41 @@ const RepairFlow=(()=>{
   }
   return {nodes,carrier,events,redacted,optimized};
  }
- function svg(tag,attrs={},text){const n=document.createElementNS(ns,tag);for(const [k,v]of Object.entries(attrs))n.setAttribute(k,v);if(text!==undefined)n.textContent=text;return n;}
+ let template=null,loading=null,lastRender=null,theme='dark';
+ function diagram(){
+  if(!loading)loading=fetch('/flow.svg').then(r=>{if(!r.ok)throw new Error('Diagram unavailable');return r.text();}).then(text=>{template=new DOMParser().parseFromString(text,'text/html').querySelector('svg');if(lastRender)render(...lastRender);}).catch(()=>{loading=null;});
+ }
  function render(root,run,company){
-  const id=company.id,data=state(run,id);if(lastCarrier!==id){selectedNode='sandbox';lastCarrier=id;}
-  root.replaceChildren();
-  const heading=document.createElement('div');heading.className='flow-heading';const title=document.createElement('div');
-  const name=document.createElement('h3');name.textContent=company.name;const caption=document.createElement('p');caption.textContent='Follow the real repair. Select a step to inspect its evidence.';title.append(name,caption);
-  const badge=document.createElement('span');badge.className='flow-live';badge.textContent=['repairing','resuming','loading'].includes(data.carrier?.status)?'LIVE · IN PROGRESS':data.carrier?.status==='waiting_contact'?'WAITING FOR CONTACT':data.carrier?.quote?'QUOTE AVAILABLE':'READY';heading.append(title,badge);root.append(heading);
-  const scroller=document.createElement('div');scroller.className='flow-canvas';const chart=svg('svg',{viewBox:'0 0 740 600',role:'group','aria-label':company.name+' live repair workflow'});
-  const defs=svg('defs');const pattern=svg('pattern',{id:'flow-grid',width:20,height:20,patternUnits:'userSpaceOnUse'});pattern.append(svg('circle',{cx:1,cy:1,r:.7,fill:'#cbd5e1'}));defs.append(pattern);
-  const marker=svg('marker',{id:'flow-arrow',viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:5,markerHeight:5,orient:'auto-start-reverse'});marker.append(svg('path',{d:'M 0 0 L 10 5 L 0 10 z',fill:'context-stroke'}));defs.append(marker);chart.append(defs,svg('rect',{width:740,height:600,fill:'url(#flow-grid)'}));
-  const paths=[
-   ['response','validation','M220 105 H270',''],['validation','docs','M460 105 H510',''],
-   ['docs','gateway','M605 150 V174',''],['gateway','model','M605 224 V250',''],
-   ['model','sandbox','M510 295 H460',''],['sandbox','quote','M270 295 H220',''],
-   ['validation','quote','M270 105 H245 V210 H125 V250','valid'],
-   ['sandbox','docs','M365 250 V184 H485 V30 H725 V105 H700','retry'],
-   ['sandbox','contact','M365 340 V450','escalate'],['contact','context','M460 495 H510',''],['context','model','M605 450 V340','resume']
-  ];
-  for(const [from,to,d,kind]of paths){let reached=data.nodes[to].status!=='pending';if(kind==='valid')reached=data.carrier?.status==='available';if(from==='sandbox'&&to==='quote')reached=data.carrier?.status==='restored';if(kind==='retry')reached=(data.carrier?.attempts?.length||0)>1;if(kind==='resume')reached=data.nodes.context.status==='done';const active=reached&&data.nodes[to].status==='active';chart.append(svg('path',{d,class:'flow-edge'+(reached?' reached':'')+(active?' flowing':''),'marker-end':'url(#flow-arrow)'}));}
-  for(const [x,y,text]of [[115,196,'Already valid'],[495,21,'Failed patch → retry'],[375,397,'5 failed patches'],[614,399,'Resume']]){const t=svg('text',{x,y,class:'flow-route-label'},text);chart.append(t);}
-  for(const [id,label,x,y,w,h]of specs){const node=data.nodes[id],g=svg('g',{class:'flow-node '+node.status+(selectedNode===id?' focused':''),role:'button',tabindex:0,'aria-label':label+': '+node.detail,'data-step':id,transform:`translate(${x} ${y})`});g.append(svg('rect',{width:w,height:h,rx:10}),svg('circle',{cx:16,cy:20,r:4}),svg('text',{x:28,y:25,class:'flow-node-title'},label),svg('text',{x:16,y:h===50?42:57,class:'flow-node-detail'},node.detail));if(h!==50)g.append(svg('text',{x:16,y:76,class:'flow-node-status'},node.status==='pending'?'WAITING':node.status.toUpperCase()));const inspect=()=>{selectedNode=id;render(root,run,company);root.querySelector('.flow-proof').scrollIntoView({behavior:'smooth',block:'nearest'});};g.addEventListener('click',inspect);g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();inspect();}});chart.append(g);}
-  scroller.append(chart);root.append(scroller);
-  const proof=document.createElement('div');proof.className='flow-proof';const summary=document.createElement('strong');summary.textContent=specs.find(n=>n[0]===selectedNode)[1]+' · '+data.nodes[selectedNode].detail;proof.append(summary);
-  const evidence=data.nodes[selectedNode].events.at(-1),pre=document.createElement('pre');pre.textContent=evidence?JSON.stringify(evidence.data,null,2):'No event recorded for this step yet.';proof.append(pre);root.append(proof);
-  const legend=document.createElement('p');legend.className='flow-legend';legend.textContent='Green · completed    Blue · running    Amber · waiting    Red · failed check    Dashed arrows · active transition';root.append(legend);
+  lastRender=[root,run,company];const data=state(run,company.id);if(lastCarrier!==company.id){selectedNode='sandbox';lastCarrier=company.id;}
+  root.replaceChildren();root.className='repair-flow archify-panel';root.dataset.theme=theme;
+  const header=document.createElement('div');header.className='archify-header';
+  const text=document.createElement('div');const kicker=document.createElement('p');kicker.className='archify-kicker';kicker.textContent='HANDSHAKE / LIVE SYSTEM';const title=document.createElement('h3');title.textContent=company.name;const caption=document.createElement('p');caption.textContent='Every step comes from a recorded event. Select a node to inspect the evidence.';text.append(kicker,title,caption);
+  const controls=document.createElement('div');controls.className='archify-controls';const status=document.createElement('span');status.className='archify-status';status.textContent=(data.carrier?.status||'ready').replaceAll('_',' ').toUpperCase();const toggle=document.createElement('button');toggle.className='archify-toggle';toggle.textContent=theme==='dark'?'Light theme':'Dark theme';toggle.onclick=()=>{theme=theme==='dark'?'light':'dark';render(root,run,company);};controls.append(status,toggle);header.append(text,controls);root.append(header);
+  const canvas=document.createElement('div');canvas.className='archify-canvas';
+  if(template){
+   const chart=template.cloneNode(true);chart.setAttribute('aria-label',company.name+' live repair workflow');
+   for(const node of chart.querySelectorAll('[data-node-id]')){
+    const id=node.dataset.nodeId,step=data.nodes[id];if(!step)continue;
+    node.classList.add('live-node',step.status);if(selectedNode===id)node.classList.add('live-selected');
+    node.setAttribute('aria-label',node.dataset.nodeLabel+': '+step.detail);node.setAttribute('aria-pressed',String(selectedNode===id));
+    const detail=node.querySelector('[data-detail="context"]');if(detail)detail.textContent=step.detail;
+    const inspect=()=>{selectedNode=id;render(root,run,company);};node.addEventListener('click',inspect);node.addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();inspect();}});
+   }
+   for(const edge of chart.querySelectorAll('[data-edge-id]')){
+    const from=edge.dataset.edgeFrom,to=edge.dataset.edgeTo;if(!from||!to)continue;
+    let reached=data.nodes[to]?.status!=='pending';const edgeId=edge.dataset.edgeId;
+    if(edgeId==='healthy')reached=data.carrier?.status==='available';
+    if(edgeId==='passed')reached=data.carrier?.status==='restored';
+    if(edgeId==='retry')reached=(data.carrier?.attempts?.length||0)>1;
+    if(edgeId==='resume')reached=data.nodes.context.status==='done';
+    edge.classList.add(reached?'live-reached':'live-pending');
+    if(reached&&data.nodes[to]?.status==='active')edge.classList.add('live-flowing');
+   }
+   canvas.append(chart);
+  }else{const pending=document.createElement('p');pending.textContent='Loading the live architecture…';canvas.append(pending);diagram();}
+  root.append(canvas);
+  const proof=document.createElement('div');proof.className='archify-proof';const summary=document.createElement('div');const label=document.createElement('p');label.className='archify-kicker';label.textContent='SELECTED STEP / '+data.nodes[selectedNode].status.toUpperCase();const heading=document.createElement('h4');heading.textContent=specs.find(n=>n[0]===selectedNode)[1];const detail=document.createElement('p');detail.textContent=data.nodes[selectedNode].detail;summary.append(label,heading,detail);
+  const evidence=data.nodes[selectedNode].events.at(-1),pre=document.createElement('pre');pre.textContent=evidence?JSON.stringify(evidence.data,null,2):'No event recorded for this step yet.';proof.append(summary,pre);root.append(proof);
  }
  return {state,render};
 })();

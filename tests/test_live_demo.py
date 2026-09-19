@@ -88,3 +88,36 @@ class RemotePersistence(unittest.TestCase):
         self.assertEqual(restarted.latest()['carriers']['cedar']['status'], 'restored')
         self.assertEqual(len(restarted.get_run('one')['events']), 1)
         self.assertEqual(restarted.incident('INC-one')['status'], 'waiting')
+
+
+class InterruptSession(unittest.TestCase):
+    def test_reset_waits_for_async_cleanup_and_preserves_old_session(self):
+        import asyncio
+        from repair_lab.coordinator import Coordinator
+        from repair_lab.store import Store
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory)/'repair.sqlite')
+            try:
+                coordinator = Coordinator(store)
+                old = coordinator.new_session()
+                store.update_carrier(old['id'], 'cedar', status='repairing', attempts=[{'status':'sandbox_running'}])
+                started = threading.Event(); closed = threading.Event()
+                async def work():
+                    try:
+                        started.set()
+                        await asyncio.Event().wait()
+                    finally:
+                        await asyncio.sleep(.02)
+                        closed.set()
+                coordinator._launch(old['id'], 'cedar', work())
+                self.assertTrue(started.wait(3))
+                fresh = coordinator.interrupt_and_new_session()
+                self.assertTrue(closed.is_set())
+                self.assertFalse(coordinator.active)
+                self.assertNotEqual(fresh['id'], old['id'])
+                self.assertTrue(all(c['status']=='ready' for c in fresh['carriers'].values()))
+                saved = store.get_run(old['id'])
+                self.assertEqual(saved['carriers']['cedar']['status'], 'interrupted')
+                self.assertEqual(saved['carriers']['cedar']['attempts'][0]['status'], 'interrupted')
+                self.assertEqual(saved['events'][-1]['kind'], 'repair_interrupted')
+            finally: store.db.close()
