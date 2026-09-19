@@ -1,8 +1,0 @@
-.venv/
-.env
-.modal-proxy.json
-.logfire/
-__pycache__/
-*.pyc
-*.egg-info/
-results/

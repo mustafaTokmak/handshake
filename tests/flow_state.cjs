@@ -1,0 +1,15 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const context=vm.createContext({});
+vm.runInContext(fs.readFileSync('repair_lab/static/flow.js','utf8')+'\nthis.flow=RepairFlow;',context);
+const snapshot=(status,events=[],attempts=[],quote=null)=>({carriers:{copper:{status,attempts,quote}},events:events.map(([kind,data])=>({carrier_id:'copper',kind,data}))});
+let state=context.flow.state(snapshot('ready'),'copper');
+assert.ok(Object.values(state.nodes).every(n=>n.status==='pending'));
+state=context.flow.state(snapshot('available',[['quote_response',{http_status:200}]],[],{amount_minor:1039,eta_days:1}),'copper');
+assert.equal(state.nodes.validation.status,'done');assert.equal(state.nodes.quote.status,'done');assert.equal(state.nodes.model.status,'pending');
+state=context.flow.state(snapshot('repairing',[['validation_failed',{}],['inference_wait',{}]]),'copper');
+assert.equal(state.nodes.model.status,'active');assert.equal(state.nodes.model.detail,'Starting on Modal');
+state=context.flow.state(snapshot('waiting_contact',[['validation_failed',{}],['contact_requested',{}]],[{status:'failed',validation:{passed:false,checks:[{passed:false}]}}]),'copper');
+assert.equal(state.nodes.contact.status,'waiting');assert.equal(state.nodes.sandbox.status,'failed');assert.equal(state.nodes.quote.status,'pending');
+state=context.flow.state(snapshot('resuming',[['contact_context_received',{}],['gateway_response',{http_status:200,guardrails:'test=1/1;redact',optimizations:'applied'}]]),'copper');
+assert.equal(state.nodes.context.status,'done');assert.equal(state.nodes.gateway.status,'protected');assert.equal(state.nodes.model.status,'active');
+console.log('Live flow state checks passed');

@@ -111,6 +111,17 @@ class RepairLifecycle(unittest.TestCase):
         self.assertEqual(self.store.incident(incident_id)['status'],'waiting')
         self.assertEqual(self.store.get_run(self.run['id'])['carriers']['harbor']['status'],'waiting_contact')
 
+    def test_restart_recovers_incident_outside_visible_history(self):
+        self.coordinator._escalate(self.run['id'],'harbor','initial','Five failed patches',lambda *_:None)
+        incident_id=self.store.get_run(self.run['id'])['carriers']['harbor']['incident_id']
+        self.coordinator.callback(incident_id,ContactReply(message_id='first',context=contact_context()))
+        for index in range(31):
+            self.store.save_run({'id':f'newer-{index}','created_at':f'2099-01-01T00:00:{index:02d}Z','carriers':{}})
+        self.assertNotIn(self.run['id'],[run['id'] for run in self.store.runs()])
+        Coordinator(self.store)
+        self.assertEqual(self.store.incident(incident_id)['status'],'waiting')
+        self.assertEqual(self.store.get_run(self.run['id'])['carriers']['harbor']['status'],'waiting_contact')
+
     def test_busy_callback_does_not_consume_reply(self):
         self.coordinator._escalate(self.run['id'],'harbor','initial','Five failed patches',lambda *_:None)
         incident_id=self.store.get_run(self.run['id'])['carriers']['harbor']['incident_id']

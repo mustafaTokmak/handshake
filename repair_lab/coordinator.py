@@ -43,7 +43,7 @@ class Coordinator:
     def __init__(self, store):
         self.store = store; self.active = set(); self.lock = threading.RLock()
         # A crashed process cannot leave a run silently marked as actively repairing.
-        for run in store.runs():
+        for run in store.runs(limit=None):
             for cid, state in run["carriers"].items():
                 if state["status"] in ("loading", "repairing", "resuming"):
                     status = "interrupted"
@@ -59,17 +59,36 @@ class Coordinator:
                             attempt["status"] = "interrupted"
                     store.update_carrier(run["id"], cid, status=status, attempts=attempts, error="Process restarted; start a fresh comparison or resend contact context with a new message ID")
 
-    def start(self, request):
+    def new_session(self):
+        from .models import StartRequest
+        with self.lock:
+            if self.active: raise ValueError("Wait for the active repair to finish before resetting the demo")
+            return self._start(StartRequest(condition="protected"), ready=True)
+
+    def start(self, request, session_id=None):
         with self.lock:
             if self.active:
                 raise ValueError("A repair is already running")
+            if session_id:
+                run = self.store.get_run(session_id)
+                if not run or any(s["status"] != "ready" for s in run["carriers"].values()):
+                    raise ValueError("This session has already started; create a new test session")
+                if self.store.latest()["id"] != session_id:
+                    raise ValueError("A newer shared session exists; refresh before starting")
+                run.update(order=request.order.model_dump(), condition=request.condition, attack=request.attack)
+                for state in run["carriers"].values(): state["status"] = "loading"
+                self.store.save_run(run)
+                self._launch(session_id, "all", self._initial(session_id))
+                return run
             return self._start(request)
 
-    def _start(self, request):
+    def _start(self, request, ready=False):
         run_id = uuid.uuid4().hex
         run = {"id": run_id, "created_at": now(), "order": request.order.model_dump(), "condition": request.condition, "attack": request.attack, "implementation_sha256": fingerprint(), "agent_prompt_sha256": hashlib.sha256(INSTRUCTIONS.encode()).hexdigest(), "route": os.getenv("REPAIR_GATEWAY_ROUTE", "repair-lab"), "model": os.getenv("HANDSHAKE_MODEL"), "remote_state_verified": False, "events": [], "carriers": {c["id"]: {"status": "loading", "quote": None, "attempts": [], "source": LEGACY_SOURCE, "incident_id": None} for c in CARRIERS}}
+        if ready:
+            for state in run["carriers"].values(): state["status"] = "ready"
         self.store.save_run(run)
-        self._launch(run_id, "all", self._initial(run_id))
+        if not ready: self._launch(run_id, "all", self._initial(run_id))
         return run
 
     def _launch(self, run_id, key, coroutine):
