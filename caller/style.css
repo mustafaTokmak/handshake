@@ -6,6 +6,8 @@ header{position:relative;border-bottom:1px solid var(--line);padding-bottom:18px
 h1{font:400 34px/1.15 Georgia,serif;margin:0 0 8px;max-width:20ch}
 h2{font:400 22px Georgia,serif;margin:0 0 10px}
 .context{margin:0;color:var(--muted);font-size:14px;font-family:ui-monospace,SFMono-Regular,monospace}
+.context.linked{color:var(--accent)}
+.context.linked::before{content:'LIVE INCIDENT · ';font-weight:700}
 .badge{position:absolute;top:0;right:0;font-size:13px;padding:5px 12px;border:1px solid var(--line);background:var(--card)}
 .badge.live{border-color:var(--accent);color:var(--accent)}
 .badge.bad{border-color:var(--bad);color:var(--bad)}

@@ -15,16 +15,59 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
-from urllib.request import urlopen
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
-from brief import FIXTURE, SYSTEM_INSTRUCTION
-from models import FINDING_DECLARATION, CallFinding
+from brief import FIXTURE, from_incident, instruction_for
+from models import FINDING_DECLARATION, CallFinding, to_context
 
 HERE = Path(__file__).resolve().parent
 CALLS = HERE / "calls"
 DEFAULT_MODEL = "gemini-3.8-live"
 KEY_NAMES = ("GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_GENAI_API_KEY", "GOOGLE_API")
 MAX_BODY = 32768
+LAB_URL = os.environ.get("REPAIR_LAB_URL", "http://127.0.0.1:8780").rstrip("/")
+LAB_TIMEOUT = 8
+
+
+def lab_get(path):
+    with urlopen(LAB_URL + path, timeout=LAB_TIMEOUT) as response:
+        return json.loads(response.read().decode())
+
+
+def lab_post(path, payload):
+    body = json.dumps(payload).encode()
+    headers = {"Content-Type": "application/json"}
+    token = os.environ.get("CONTACT_CALLBACK_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    request = Request(LAB_URL + path, data=body, headers=headers, method="POST")
+    with urlopen(request, timeout=LAB_TIMEOUT) as response:
+        return response.status, json.loads(response.read().decode() or "{}")
+
+
+def waiting_incident():
+    """Find an incident the repair lab is blocked on. Their record is another
+    service's output, so nothing about its shape is assumed."""
+    try:
+        latest = lab_get("/api/latest")
+    except (HTTPError, URLError, OSError, ValueError):
+        return None
+    if not isinstance(latest, dict):
+        return None
+    carriers = latest.get("carriers")
+    states = carriers.values() if isinstance(carriers, dict) else carriers if isinstance(carriers, list) else []
+    for state in states:
+        if not isinstance(state, dict):
+            continue
+        if state.get("status") == "waiting_contact" and state.get("incident_id"):
+            try:
+                incident = lab_get("/api/incidents/" + str(state["incident_id"]))
+            except (HTTPError, URLError, OSError, ValueError):
+                return None
+            if isinstance(incident, dict) and incident.get("status") == "waiting":
+                return incident
+    return None
 
 
 def load_key():
@@ -93,13 +136,18 @@ def serve(port, model):
                 # socket. Bound to localhost; do not expose this server.
                 # liveSetup is the single source of truth: the page and the smoke
                 # test send this same object, so they cannot drift apart.
+                incident = waiting_incident()
+                brief = from_incident(incident) if incident else FIXTURE
                 return self.send_payload(200, {
                     "apiKey": key, "model": model, "hasKey": bool(key),
-                    "brief": FIXTURE,
+                    "brief": brief,
+                    "source": brief.get("source", "fixture"),
+                    "incidentId": brief.get("incident_id", ""),
+                    "callbackPath": brief.get("callback_path", ""),
                     "liveSetup": {
                         "model": "models/" + model,
                         "generationConfig": {"responseModalities": ["AUDIO"]},
-                        "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
+                        "systemInstruction": {"parts": [{"text": instruction_for(brief)}]},
                         "tools": [{"functionDeclarations": [FINDING_DECLARATION]}],
                         "inputAudioTranscription": {},
                         "outputAudioTranscription": {},
@@ -141,13 +189,33 @@ def serve(port, model):
                 # the schema refuses. Record the rejection rather than hiding it.
                 return self.send_payload(400, {"error": "Finding rejected by schema",
                                                "detail": str(exc)[:500]})
+            incident_id = str(payload.get("incidentId") or "")[:100]
+            carrier = str(payload.get("carrier") or FIXTURE["provider"])[:100]
+            relay = {"attempted": False}
+            if incident_id:
+                # Only the typed finding crosses this boundary. The transcript
+                # stays here; it is never sent to the code-generating agent.
+                context = to_context(finding, carrier)
+                reply = {"message_id": "escalation-call-%d" % time.time(),
+                         "source": "escalation-voice-caller",
+                         "context": context}
+                relay = {"attempted": True, "incident_id": incident_id,
+                         "context_chars": len(context)}
+                try:
+                    status, body = lab_post("/api/incidents/%s/context" % incident_id, reply)
+                    relay.update(ok=True, status=status, response=body)
+                except HTTPError as exc:
+                    relay.update(ok=False, status=exc.code, error=exc.read().decode()[:400])
+                except (URLError, OSError, ValueError) as exc:
+                    relay.update(ok=False, error=type(exc).__name__)
             record = {"recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                      "run_id": FIXTURE["run_id"], "model": model,
+                      "incident_id": incident_id or None, "carrier": carrier, "model": model,
                       "finding": finding.model_dump(mode="json"),
+                      "relay": relay,
                       "transcript": payload.get("transcript") or []}
             name = CALLS / ("call-%d.json" % time.time())
             name.write_text(json.dumps(record, indent=2) + "\n")
-            self.send_payload(200, {"saved": name.name, "finding": record["finding"]})
+            self.send_payload(200, {"saved": name.name, "finding": record["finding"], "relay": relay})
 
         def log_message(self, *_):
             pass

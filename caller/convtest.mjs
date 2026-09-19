@@ -11,8 +11,9 @@ const S=await fetch('http://127.0.0.1:8770/api/session').then(r=>r.json());
 
 // What the human "support rep" says, fed in as text turns on cue.
 const REPLIES = [
-  "Oh yeah, sorry about that. We pushed v3 last night and renamed tracking_number to tracking_ref across the shipments object.",
-  "It went out around 22:00 UTC on the eighteenth. If you send an Accept-Version: 2 header you'll keep the old field names until January.",
+  "Right, the public v1 guide is stale. You need service_agreement equals HARBOR-DEMO-AGREEMENT-7F29, that's seven foxtrot two nine, and order_ref has to be at the top level.",
+  "The quote_request block wants mass_grams, which is weight_kg times a thousand, distance_meters is distance_km times a thousand, and country_code instead of destination_country. Keep the old v1 fields alongside, our API allows the extras.",
+  "Response side, it's rate.pence as an integer, rate.currency_code, rate.days and rate.product. Legacy responses still use price_minor, currency, delivery_days and service, so handle both.",
 ];
 
 const ws=new WebSocket(`wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${API}`);
@@ -48,9 +49,10 @@ ws.onmessage=async e=>{
         console.log('\n=== report_finding ===');
         console.log(JSON.stringify(fc.args,null,2));
         const r=await fetch('http://127.0.0.1:8770/api/finding',{method:'POST',
-          headers:{'Content-Type':'application/json'},body:JSON.stringify({finding:fc.args,transcript:[]})});
+          headers:{'Content-Type':'application/json'},body:JSON.stringify({finding:fc.args,transcript:[],incidentId:S.incidentId||'',carrier:(S.brief&&S.brief.provider)||''})});
         const b=await r.json();
         console.log('\nserver validation:',r.ok?'ACCEPTED -> '+b.saved:'REJECTED -> '+(b.detail||b.error));
+        if(b.relay)console.log('relay:',JSON.stringify(b.relay));
         clearTimeout(bail); ws.close(); process.exit(r.ok?0:1);
       }
     }

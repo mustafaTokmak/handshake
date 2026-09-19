@@ -158,11 +158,22 @@ async function submitFinding(args) {
   $('finding-panel').hidden = false;
   try {
     const r = await fetch('/api/finding', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ finding: args, transcript }) });
+      body: JSON.stringify({ finding: args, transcript,
+        incidentId: (session && session.incidentId) || '',
+        carrier: (session && session.brief && session.brief.provider) || '' }) });
     const b = await r.json();
-    $('saved').textContent = r.ok ? 'Schema validated · saved to calls/' + b.saved
-                                  : 'Schema REJECTED this finding: ' + (b.detail || b.error);
-    $('saved').className = 'note ' + (r.ok ? 'ok' : 'bad');
+    if (!r.ok) {
+      $('saved').textContent = 'Schema REJECTED this finding: ' + (b.detail || b.error);
+      $('saved').className = 'note bad';
+      return;
+    }
+    const relay = b.relay || {};
+    let msg = 'Schema validated · saved to calls/' + b.saved;
+    if (relay.attempted && relay.ok) msg += ' · relayed to repair lab (' + relay.context_chars + ' chars, HTTP ' + relay.status + ') — repair resuming';
+    else if (relay.attempted) msg += ' · relay FAILED: ' + (relay.error || 'HTTP ' + relay.status);
+    else msg += ' · no live incident, nothing relayed';
+    $('saved').textContent = msg;
+    $('saved').className = 'note ' + (relay.attempted && !relay.ok ? 'bad' : 'ok');
   } catch (err) {
     $('saved').textContent = 'Could not save: ' + err.message;
     $('saved').className = 'note bad';
@@ -239,7 +250,11 @@ addEventListener('keyup', e => { if (e.code === 'Space' && live) { e.preventDefa
 
 fetch('/api/session').then(r => r.json()).then(s => {
   session = s;
-  $('context').textContent = s.brief.provider + ' · ' + s.brief.support_line + ' · ' + s.brief.order_id + ' · ' + s.model;
+  const live = s.source === 'repair-lab';
+  $('context').textContent = s.brief.provider + ' · ' + s.brief.support_line + ' · '
+    + (live ? 'incident ' + s.incidentId : s.brief.order_id) + ' · ' + s.model;
+  $('context').classList.toggle('linked', live);
+  document.title = (live ? 'Escalation — ' + s.brief.provider : 'Escalation — call the provider');
   setStatus(s.hasKey ? 'Ready' : 'No API key', s.hasKey ? '' : 'bad');
   $('call').disabled = !s.hasKey;
 }).catch(() => setStatus('Server unreachable', 'bad'));
