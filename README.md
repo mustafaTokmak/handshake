@@ -221,13 +221,14 @@ node caller/convtest.mjs                # the whole conversation, no microphone
 ## Tests
 
 ```
-uv run python -m unittest tests.test_repair tests.test_experiments tests.test_live_demo caller.test_caller
+uv run python -m unittest tests.test_repair tests.test_experiments tests.test_live_demo
+(cd caller && uv run python -m unittest test_caller)
 ```
 
 No credentials required — the model and the sandbox are mocked.
 
-`caller/` is a directory of scripts rather than a package, so its suite puts its
-own directory on `sys.path`; it runs from the repo root or from inside `caller/`.
+`caller/` is a directory of scripts rather than a package, which is why its suite
+runs from inside that directory.
 
 ## A note on what is fictional
 
