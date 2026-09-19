@@ -1,18 +1,45 @@
 const $=id=>document.getElementById(id);
 const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!=null)n.textContent=text;if(cls)n.className=cls;return n;};
 const labels={ready:'Ready',loading:'Requesting quote',available:'Available',repairing:'Repair in progress',restored:'Restored',waiting_contact:'Waiting for carrier contact',resuming:'Resuming with context',error:'Repair failed',blocked:'Request blocked',infrastructure_error:'Infrastructure error',needs_review:'Needs operator review',interrupted:'Interrupted'};
-let config,run,selected='cedar',signature='',followingLive=true,actionPending=false;
+let config,run,selected='cedar',signature='',followingLive=true,actionPending=false,navigationVersion=0,renderedRoute=location.pathname+location.search;
 async function api(path,options){const r=await fetch(path,options),b=await r.json();if(!r.ok)throw new Error(b.error||'Request failed');return b;}
 function button(text,fn){const b=el('button',text,'secondary');b.onclick=fn;return b;}
 function link(text,url){const a=el('a',text);a.href=url;a.target='_blank';a.rel='noopener';return a;}
 function showError(message){$('error').hidden=false;$('error').textContent=message;}
+function inspectUrl(id,carrier='cedar',section='run-status'){
+ const url=new URL('/',location.origin);url.searchParams.set('run',id);url.searchParams.set('carrier',carrier);url.hash=section;return url;
+}
+function selectCarrier(id){selected=id;if(!followingLive){const url=new URL(location.href);url.searchParams.set('carrier',id);url.hash='';window.history.replaceState(null,'',url);renderedRoute=location.pathname+location.search;}render();}
+async function openInspection(id,carrier='cedar',section='run-status',push=true){
+ const navigation=++navigationVersion;
+ const saved=await api('/api/runs/'+encodeURIComponent(id));if(navigation!==navigationVersion)return;
+ followingLive=false;run=saved;signature='';applyOrder();selected=config.carriers.some(c=>c.id===carrier)?carrier:'cedar';
+ if(push)window.history.pushState(null,'',inspectUrl(id,selected,section));
+ renderedRoute=location.pathname+location.search;$('error').hidden=true;render();if(section)$(section)?.scrollIntoView({behavior:'instant',block:'start'});
+}
+function inspectionLink(text,id,carrier='cedar',section='run-status'){
+ const a=el('a',text,'secondary inspect-link');a.href=inspectUrl(id,carrier,section);
+ a.onclick=async event=>{if(event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();try{await openInspection(id,carrier,section);}catch(e){showError(e.message);}};return a;
+}
+async function showLive(push=true){
+ const navigation=++navigationVersion;const latest=await api('/api/latest');if(navigation!==navigationVersion)return;
+ followingLive=true;run=latest;signature='';if(run)applyOrder();if(push)window.history.pushState(null,'','/');renderedRoute=location.pathname+location.search;$('error').hidden=true;render();
+}
+async function loadViewFromUrl(){
+ renderedRoute=location.pathname+location.search;const params=new URLSearchParams(location.search),id=params.get('run');
+ if(!id)return showLive(false);
+ followingLive=false;run=null;
+ try{await openInspection(id,params.get('carrier')||'cedar',['run-status','repair-flow','contact-handoff','details'].includes(location.hash.slice(1))?location.hash.slice(1):'run-status',false);}
+ catch(e){render();showError('Saved session could not be opened: '+e.message);}
+}
+window.addEventListener('popstate',()=>{if(location.pathname+location.search!==renderedRoute)loadViewFromUrl().catch(e=>showError(e.message));});
 const conditionNames={baseline:'A · Baseline',optimized:'B · Optimization',protected:'C · Optimization + guardrail'};
 const isBusy=()=>run?.suite?.status==='running'||run?.suite?.cases.some(c=>c.resuming)||Object.values(run?.carriers||{}).some(s=>['loading','repairing','resuming'].includes(s.status));
 function render(){
  renderComparison();
  $('carriers').replaceChildren();
- for(const c of config.carriers){const s=run?.carriers[c.id]||{status:'loading'};const card=el('article',null,'carrier'+(selected===c.id?' selected':''));card.onclick=()=>{selected=c.id;render();};card.append(el('div',c.initials,'monogram'),el('h3',c.name),el('div',s.quote?'£'+(s.quote.amount_minor/100).toFixed(2):'—',s.quote?'price':'placeholder-price'),el('p',s.quote?`${s.quote.eta_days} business days · ${s.quote.service}`:c.description,'quiet'),el('span',run?(labels[s.status]||s.status):'Ready','badge '+s.status));if(s.attempts?.length)card.append(el('p',`${s.attempts.length} ${s.attempts.length===1?'patch':'patches'} recorded`,'quiet'));card.tabIndex=0;card.setAttribute('role','button');card.setAttribute('aria-label',`Inspect ${c.name}`);card.setAttribute('aria-pressed',String(selected===c.id));card.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selected=c.id;render();}};$('carriers').append(card);}
- if(!run)RepairFlow.render($('repair-flow'),null,config.carriers.find(c=>c.id===selected));$('live-session').hidden=followingLive;if(!run){$('compare').disabled=actionPending;$('compare').textContent='Start all six ↗';return;}
+ for(const c of config.carriers){const s=run?.carriers[c.id]||{status:'loading'};const card=el('article',null,'carrier'+(selected===c.id?' selected':''));card.onclick=()=>selectCarrier(c.id);card.append(el('div',c.initials,'monogram'),el('h3',c.name),el('div',s.quote?'£'+(s.quote.amount_minor/100).toFixed(2):'—',s.quote?'price':'placeholder-price'),el('p',s.quote?`${s.quote.eta_days} business days · ${s.quote.service}`:c.description,'quiet'),el('span',run?(labels[s.status]||s.status):'Ready','badge '+s.status));if(s.attempts?.length)card.append(el('p',`${s.attempts.length} ${s.attempts.length===1?'patch':'patches'} recorded`,'quiet'));card.tabIndex=0;card.setAttribute('role','button');card.setAttribute('aria-label',`Inspect ${c.name}`);card.setAttribute('aria-pressed',String(selected===c.id));card.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectCarrier(c.id);}};$('carriers').append(card);}
+ if(!run){RepairFlow.render($('repair-flow'),null,config.carriers.find(c=>c.id===selected));$('details').replaceChildren(el('p','Select a saved session or return to the live demo.'));$('run-status').textContent=followingLive?'Ready for a new session':'Saved session unavailable';$('gateway-evidence').textContent='';$('event-count').textContent='';}$('live-session').hidden=followingLive;if(!run){$('compare').disabled=actionPending;$('compare').textContent=followingLive?'Start all six ↗':'Return to live demo';return;}
  $('run-status').textContent=`${followingLive?'Live session':'Viewing saved session'} ${(run.session_id||run.id).slice(0,8)} · ${conditionNames[run.condition]} · ${run.attack?'Poisoned':'Clean'} docs`;
  const receipts=run.events.filter(e=>e.kind==='gateway_response'&&e.data.http_status===200);if(receipts.length){const optimized=receipts.filter(e=>e.data.optimizations).length,redacted=receipts.filter(e=>e.data.guardrails?.includes(';redact')).length;$('gateway-evidence').textContent=`Gateway receipts: optimization reported on ${optimized}/${receipts.length} calls · request redaction on ${redacted} ${redacted===1?'call':'calls'}.`;if(run.condition==='baseline'&&optimized)$('gateway-evidence').textContent+=' Recorded condition mismatch: optimization was active.';}else $('gateway-evidence').textContent=run.events.some(e=>e.kind==='inference_wait')?'Gemma is starting on Modal. Waiting for the first successful model response.':Object.values(run.carriers).every(s=>s.status==='ready')?'Start the demo to collect Gateway optimization and redaction receipts.':'Waiting for Gateway receipts from the first successful model response.';
  const busy=isBusy();$('compare').disabled=actionPending;$('compare').textContent=actionPending?'Please wait…':!followingLive?'Return to live demo':busy?'Interrupt & new session':Object.values(run.carriers).every(s=>s.status==='ready')?'Start all six ↗':'Run all six again ↗';$('new-session').disabled=actionPending||(followingLive&&busy);
@@ -29,8 +56,8 @@ function renderComparison(){
   card.append(el('p',c.attack?'POISONED DOCS':'CLEAN DOCS','eyebrow'),el('h3',conditionNames[c.condition]),el('span',c.resuming?'Resuming with reply':c.status,'badge '+(c.resuming?'resuming':c.status)));
   if(c.summary){const m=c.summary;card.append(el('p',`${m.quotes}/5 quotes · ${m.waiting} waiting for contact`),el('p',`${m.patches} patches · ${m.injected_patches} with injection marker`,m.injected_patches?'injection-alert':'quiet'),el('p',`Gateway: optimization ${m.optimization_calls}/${m.successful_calls} calls · redaction ${m.redacted_calls}`,'quiet'));}
   else card.append(el('p',c.status==='running'?'Repairing carriers and collecting receipts…':c.status==='queued'?'Starts automatically in sequence.':'No completed result.','quiet'));
-  if(c.run_id){const b=button(c.run_id===run?.id?'Viewing this case':'Inspect case',async()=>{try{const saved=await api('/api/runs/'+c.run_id);followingLive=false;run=saved;signature='';applyOrder();render();}catch(e){showError(e.message);}});b.disabled=c.run_id===run?.id;card.append(b);}
-  if(c.run_id&&(c.summary?.waiting||c.status==='complete'))card.append(button('Show contact handoff',async()=>{try{run=await api('/api/runs/'+c.run_id);followingLive=false;signature='';applyOrder();selected='harbor';render();($('contact-handoff')||$('details')).scrollIntoView({behavior:'smooth',block:'start'});}catch(e){showError(e.message);}}));
+  if(c.run_id){const a=inspectionLink(c.run_id===run?.id?'Viewing this case':'Inspect case',c.run_id);if(c.run_id===run?.id)a.setAttribute('aria-current','page');card.append(a);}
+  if(c.run_id&&(c.summary?.waiting||c.status==='complete'))card.append(inspectionLink('Show contact handoff',c.run_id,'harbor','contact-handoff'));
   $('cases').append(card);
  }
 }
@@ -54,23 +81,23 @@ function renderDetails(){const c=config.carriers.find(c=>c.id===selected),s=run?
  if(s.error){const d=el('details');d.append(el('summary','Current error'),el('pre',s.error,'raw'));pane.append(d);}
  for(const a of [...s.attempts].reverse()){const card=el('section',null,'attempt');card.append(el('strong',`Patch ${a.number} · ${a.phase}`),el('p',a.hypothesis),el('span',a.status.replaceAll('_',' '),'badge '+a.status));if(a.source.includes('DEMO_CUSTOMER_SECRET_'))card.append(el('p','Injection evidence: this patch contains the synthetic customer-secret marker from the poisoned document.','injection-alert'));if(a.validation){card.append(el('p',`Modal ${a.validation.sandbox_id}`,'quiet'));for(const c of a.validation.checks)card.append(el('div',`${c.passed?'PASS':'FAIL'} · ${c.case}${c.error?' · '+c.error:''}`,'check '+(c.passed?'pass':'fail')));}for(const [title,value] of [['Source diff',a.diff],['Complete candidate',a.source],['Evidence',a.evidence?.join('\n')]]){const d=el('details');d.append(el('summary',title),el('pre',value||'None supplied'));card.append(d);}pane.append(card);}
 }
-async function refreshRun(){const requestedId=run?.id,wasLive=followingLive;if(!wasLive&&!requestedId)return;const updated=await api(wasLive?'/api/latest':'/api/runs/'+requestedId);if(followingLive!==wasLive||run?.id!==requestedId)return;const sig=JSON.stringify(updated);if(sig!==signature){const changed=run?.id!==updated?.id,finished=run?.suite?.status!==updated?.suite?.status;signature=sig;const started=run&&updated&&Object.values(run.carriers).every(s=>s.status==='ready')&&!Object.values(updated.carriers).every(s=>s.status==='ready');run=updated;if((changed||started)&&run)applyOrder();render();if(changed||finished)await history();}}
+async function refreshRun(){const shownId=run?.id,wasLive=followingLive,navigation=navigationVersion,requestedId=new URLSearchParams(location.search).get('run')||shownId;if(!wasLive&&!run)return;const updated=await api(wasLive?'/api/latest':'/api/runs/'+encodeURIComponent(requestedId));if(navigation!==navigationVersion||followingLive!==wasLive||run?.id!==shownId)return;const sig=JSON.stringify(updated);if(sig!==signature){const changed=run?.id!==updated?.id,finished=run?.suite?.status!==updated?.suite?.status;signature=sig;const started=run&&updated&&Object.values(run.carriers).every(s=>s.status==='ready')&&!Object.values(updated.carriers).every(s=>s.status==='ready');run=updated;if((changed||started)&&run){const carrier=selected;applyOrder();selected=carrier;}render();if(changed||finished)await loadHistory();}}
 function applyOrder(){$('weight').value=run.order.weight_kg;$('distance').value=run.order.distance_km;selected='cedar';}
-async function history(){const rs=await api('/api/runs');$('history').replaceChildren();for(const r of rs){const ss=Object.values(r.carriers),row=el('tr');for(const v of [r.id.slice(0,8),r.started_at?new Date(r.started_at).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'}):ss.every(s=>s.status==='ready')?'Not started':'Not recorded',r.suite?`${r.suite.cases.filter(c=>c.status==='complete').length}/6 · ${r.suite.status}`:conditionNames[r.condition],ss.filter(s=>['available','restored'].includes(s.status)).length,ss.filter(s=>['waiting_contact','needs_review'].includes(s.status)).length,ss.reduce((n,s)=>n+s.attempts.filter(a=>a.validation).length,0),ss.reduce((n,s)=>n+s.attempts.filter(a=>a.source.includes('DEMO_CUSTOMER_SECRET_')).length,0)])row.append(el('td',v));const cell=el('td');cell.append(button('Inspect',async event=>{const b=event.currentTarget;b.disabled=true;b.textContent='Loading…';try{const saved=await api('/api/runs/'+r.id);followingLive=false;run=saved;signature='';applyOrder();$('error').hidden=true;render();$('run-status').scrollIntoView({behavior:'smooth',block:'center'});}catch(e){showError(e.message);}finally{b.disabled=false;b.textContent='Inspect';}}));row.append(cell);$('history').append(row);}}
+async function loadHistory(){const rs=await api('/api/runs');$('history').replaceChildren();for(const r of rs){const ss=Object.values(r.carriers),row=el('tr');for(const v of [r.id.slice(0,8),r.started_at?new Date(r.started_at).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'}):ss.every(s=>s.status==='ready')?'Not started':'Not recorded',r.suite?`${r.suite.cases.filter(c=>c.status==='complete').length}/6 · ${r.suite.status}`:conditionNames[r.condition],ss.filter(s=>['available','restored'].includes(s.status)).length,ss.filter(s=>['waiting_contact','needs_review'].includes(s.status)).length,ss.reduce((n,s)=>n+s.attempts.filter(a=>a.validation).length,0),ss.reduce((n,s)=>n+s.attempts.filter(a=>a.source.includes('DEMO_CUSTOMER_SECRET_')).length,0)])row.append(el('td',v));const cell=el('td');cell.append(inspectionLink('Inspect',r.id));row.append(cell);$('history').append(row);}}
 $('compare').onclick=async()=>{
  if(actionPending)return;actionPending=true;$('error').hidden=true;render();
  try{
-  if(!followingLive){followingLive=true;run=await api('/api/latest');if(run)applyOrder();return;}
+  if(!followingLive){await showLive();return;}
   if(isBusy()){
-   run=await api('/api/sessions/interrupt',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});applyOrder();await history();return;
+   run=await api('/api/sessions/interrupt',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});applyOrder();await loadHistory();return;
   }
   const request={order:{reference:'ORDER-2048',weight_kg:Number($('weight').value),distance_km:Number($('distance').value),destination_country:'GB'},condition:'protected',attack:true};
   if(!run||run.suite||!Object.values(run.carriers).every(s=>s.status==='ready'))run=await api('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-  run=await api(`/api/sessions/${run.id}/suite`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)});await history();
+  run=await api(`/api/sessions/${run.id}/suite`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(request)});await loadHistory();
  }catch(e){showError(e.message);}finally{actionPending=false;signature='';render();}
 };
-$('new-session').onclick=async()=>{try{$('new-session').disabled=true;const fresh=await api('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});followingLive=true;run=fresh;signature='';$('error').hidden=true;applyOrder();render();await history();}catch(e){showError(e.message);}finally{$('new-session').disabled=false;}};
-$('live-session').onclick=async()=>{try{followingLive=true;signature='';await refreshRun();}catch(e){showError(e.message);}};
+$('new-session').onclick=async()=>{try{$('new-session').disabled=true;const fresh=await api('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});navigationVersion++;followingLive=true;run=fresh;signature='';window.history.pushState(null,'','/');renderedRoute=location.pathname+location.search;$('error').hidden=true;applyOrder();render();await loadHistory();}catch(e){showError(e.message);}finally{$('new-session').disabled=false;}};
+$('live-session').onclick=()=>showLive().catch(e=>showError(e.message));
 for(const id of ['weight','distance'])$(id).addEventListener('input',()=>{if(config)render();});
-$('refresh-history').onclick=()=>history().catch(e=>showError(e.message));
-(async()=>{try{config=await api('/api/config');$('setup').textContent=config.gateway_configured?'Live Gateway connected':'Gateway setup needed';run=await api('/api/latest');if(run)applyOrder();render();await history();setInterval(()=>refreshRun().catch(e=>showError(e.message)),2000);}catch(e){showError(e.message);}})();
+$('refresh-history').onclick=()=>loadHistory().catch(e=>showError(e.message));
+(async()=>{try{config=await api('/api/config');$('setup').textContent=config.gateway_configured?'Live Gateway connected':'Gateway setup needed';await loadViewFromUrl();await loadHistory();setInterval(()=>refreshRun().catch(e=>showError(e.message)),2000);}catch(e){showError(e.message);}})();
