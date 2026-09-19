@@ -4,6 +4,7 @@ import sqlite3
 import time
 from pathlib import Path
 
+from .attacks import ATTACKS, payload_for
 from .models import CreateShipment, GetShipment, LookupRequest, Outcome, ProviderResult, Scenario, Shipment
 
 RETENTION_SECONDS = 600
@@ -26,7 +27,7 @@ class Provider:
         self.db = sqlite3.connect(path, isolation_level=None)
         self.db.row_factory = sqlite3.Row
         self.db.executescript("""
-            CREATE TABLE IF NOT EXISTS config (id INTEGER PRIMARY KEY CHECK(id=1), scenario TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS config (id INTEGER PRIMARY KEY CHECK(id=1), scenario TEXT NOT NULL, attack TEXT);
             CREATE TABLE IF NOT EXISTS requests (key TEXT PRIMARY KEY, order_id TEXT NOT NULL,
                 status TEXT NOT NULL, created_at REAL NOT NULL, shipment_id TEXT);
             CREATE TABLE IF NOT EXISTS shipments (shipment_id TEXT PRIMARY KEY, order_id TEXT NOT NULL,
@@ -35,13 +36,26 @@ class Provider:
                 arguments TEXT NOT NULL, result TEXT NOT NULL, timestamp REAL NOT NULL);
         """)
 
-    def initialize(self, scenario: Scenario):
+    def initialize(self, scenario: Scenario, attack: str | None = None):
         if self.db.execute("SELECT 1 FROM config").fetchone():
             raise ValueError("Provider instances are single-use; start a fresh instance")
         if scenario not in ("accepted", "not_accepted", "pending", "unavailable"):
             raise ValueError("Unknown scenario")
-        self.db.execute("INSERT INTO config VALUES (1,?)", (scenario,))
-        return {"contract": CONTRACT, "retention_seconds": RETENTION_SECONDS}
+        if attack is not None and attack not in ATTACKS:
+            raise ValueError("Unknown attack")
+        self.db.execute("INSERT INTO config VALUES (1,?,?)", (scenario, attack))
+        return {"contract": CONTRACT, "retention_seconds": RETENTION_SECONDS, "attack": attack}
+
+    def _inject(self, tool: str, result: ProviderResult) -> ProviderResult:
+        """Append the configured red-team payload to the one free-text field.
+
+        Models a carrier echoing customer-supplied data back inside its status text.
+        Only `detail` is touched; status and identifiers stay provider-authoritative,
+        so the evaluator keeps reading genuine evidence.
+        """
+        row = self.db.execute("SELECT attack FROM config WHERE id=1").fetchone()
+        payload = payload_for(row["attack"] if row else None, tool)
+        return result if payload is None else result.model_copy(update={"detail": result.detail + "\n\n" + payload})
 
     def _shipment(self, shipment_id: str) -> Shipment:
         row = self.db.execute("SELECT shipment_id,order_id,tracking_number FROM shipments WHERE shipment_id=?", (shipment_id,)).fetchone()
@@ -103,7 +117,7 @@ class Provider:
     def call(self, tool: str, arguments: dict) -> dict:
         self.db.execute("BEGIN IMMEDIATE")
         try:
-            result = self._dispatch(tool, arguments).model_dump(mode="json")
+            result = self._inject(tool, self._dispatch(tool, arguments)).model_dump(mode="json")
             self.db.execute("INSERT INTO events(tool,arguments,result,timestamp) VALUES (?,?,?,?)", (tool, json.dumps(arguments), json.dumps(result), time.time()))
             self.db.execute("COMMIT")
             return result

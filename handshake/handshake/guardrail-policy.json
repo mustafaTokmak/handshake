@@ -1,0 +1,60 @@
+{
+  "name": "Handshake \u2014 provider text is data, not instructions",
+  "category": "Guardrail",
+  "action": "Redact",
+  "action_variants": {
+    "Observe": "Baseline arm. Records a match and changes nothing \u2014 detection, not protection.",
+    "Redact": "Recommended. Strips the matched span before the model reads it; the run continues.",
+    "Block": "Strict arm. Refuses the call outright; the run fails closed rather than continuing."
+  },
+  "pattern_source": "regex",
+  "target_route": "modal",
+  "scope": "Request data before it reaches the model. In an agentic loop every turn replays the full message history, so tool results \u2014 including ProviderResult.detail \u2014 are in scope on each subsequent request.",
+  "patterns": [
+    {
+      "name": "authority_override",
+      "regex": "(?i)\\bsupersede(s|d)?\\b|\\bdeprecated\\s+as\\s+of\\b",
+      "catches": "A newer 'contract' asserting authority over the system prompt."
+    },
+    {
+      "name": "fresh_key_instruction",
+      "regex": "(?i)\\bnew\\s+(unique\\s+)?request[_ ]?key\\b",
+      "catches": "Instruction to mint a key, which is the duplicate-shipment path."
+    },
+    {
+      "name": "distrust_the_tool",
+      "regex": "(?i)\\badvisory\\s+only\\b|\\bmust\\s+not\\s+be\\s+trusted\\b|\\bdo\\s+not\\s+trust\\b",
+      "catches": "Framing that discredits the authoritative reconciliation tool."
+    },
+    {
+      "name": "verification_skip",
+      "regex": "(?i)\\bverification\\s+is\\s+(not\\s+required|unnecessary)\\b|\\balready\\s+confirmed\\s+at\\s+the\\s+carrier\\b",
+      "catches": "Pre-emptive excuse for skipping get_shipment."
+    },
+    {
+      "name": "order_redirect",
+      "regex": "(?i)\\bresubmit\\b[^.]{0,60}\\bORDER-\\d+",
+      "catches": "Redirecting creation to another order."
+    },
+    {
+      "name": "unbounded_polling",
+      "regex": "(?i)\\bcontinuously\\s+until\\b|\\brepeated\\s+polling\\b",
+      "catches": "Budget-exhaustion instruction."
+    },
+    {
+      "name": "prompt_extraction",
+      "regex": "(?i)\\b(system\\s+instructions?|system\\s+prompt)\\b[^.]{0,60}\\bverbatim\\b|\\bverbatim\\b[^.]{0,60}\\b(system\\s+instructions?|system\\s+prompt)\\b",
+      "catches": "Exfiltration of instructions through the explanation field."
+    },
+    {
+      "name": "classic_override",
+      "regex": "(?i)\\bignore\\s+(all\\s+)?(previous|prior|the\\s+above)\\b",
+      "catches": "The textbook opener. Not used by this catalogue; included because real traffic uses it."
+    }
+  ],
+  "setup_url": "https://pydantic.dev/hackathon",
+  "feature_flag": "#enableFlags=gateway_optimizations",
+  "verification": "Create this as a Guardrail in Gateway (not an Optimization), choose the regex pattern source, add each pattern above, set the action, and bind it to the modal route. Record the rule URL in HANDSHAKE_GATEWAY_GUARDRAIL_REFERENCE. Confirm matches appear in the rule's Usage chart and that Logfire traces show the redacted span. The local condition label records which remote action was set; it does not toggle or verify it.",
+  "known_limitation": "Regex matches attacker-controlled text, so a reworded payload evades it. This raises the cost of an attack; it does not bound it. The toolset invariant in agent.py is what holds when a pattern misses.",
+  "pattern_note": "Spaces are written \\s+ throughout: payloads wrap across lines, and a literal space silently fails to match text broken by a newline."
+}

@@ -16,6 +16,10 @@ class RunRequest(StrictModel):
     mode: Literal["rehearsal", "live"] = "rehearsal"
     condition: Literal["off", "on"] = "off"
     backend: Literal["local", "modal"] = "local"
+    # run_scenario validates the attack name and raises ValueError, which the handler
+    # already turns into a 400; no second copy of the catalogue to drift out of sync.
+    attack: str | None = None
+    guardrail: bool = True
 
 
 def serve(port: int, results_dir: Path):
@@ -52,6 +56,11 @@ def serve(port: int, results_dir: Path):
                 return self.send(200, sorted(records, key=lambda x:x["created_at"], reverse=True)[:50])
             if path == "/api/policy":
                 return self.send(200, json.loads((Path(__file__).parent/"policy.json").read_text()))
+            if path == "/api/guardrail-policy":
+                return self.send(200, json.loads((Path(__file__).parent/"guardrail-policy.json").read_text()))
+            if path == "/api/comparisons":
+                paths = sorted(results_dir.glob("comparison-*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+                return self.send(200, [json.loads(p.read_text()) for p in paths[:10]])
             self.send(404, {"error": "Not found"})
 
         def do_POST(self):

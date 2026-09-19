@@ -12,7 +12,7 @@ def main():
             request = json.loads(line)
             op = request["op"]
             if op == "initialize":
-                result = provider.initialize(request["scenario"])
+                result = provider.initialize(request["scenario"], request.get("attack"))
             elif op == "tool":
                 result = provider.call(request["tool"], request["arguments"])
             elif op == "evaluate":
