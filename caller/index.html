@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Escalation — call the provider</title>
+<link rel="stylesheet" href="/style.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<main>
+  <header>
+    <h1>The API changed. Ask them what they did.</h1>
+    <p id="context" class="context">—</p>
+    <span id="status" class="badge">Checking setup</span>
+  </header>
+
+  <section id="queue-panel" class="queue-panel" hidden>
+    <h2>Waiting for a call <button id="refresh" class="link">Refresh</button></h2>
+    <ul id="queue" class="queue"></ul>
+  </section>
+
+  <ul id="transcript" class="transcript">
+    <li class="hint">Press <b>Start call</b>. The agent speaks first &mdash; then hold <b>Space</b> to reply, and release when you are done.</li>
+  </ul>
+
+  <div class="controls">
+    <button id="call" disabled>Start call</button>
+    <button id="talk" class="talk" hidden>Hold to talk&nbsp; (or hold Space)</button>
+  </div>
+
+  <section id="finding-panel" hidden>
+    <h2>Typed finding</h2>
+    <dl id="finding"></dl>
+    <p id="saved" class="note"></p>
+  </section>
+</main>
+</body>
+</html>
