@@ -30,11 +30,27 @@ function renderComparison(){
   if(c.summary){const m=c.summary;card.append(el('p',`${m.quotes}/5 quotes · ${m.waiting} waiting for contact`),el('p',`${m.patches} patches · ${m.injected_patches} with injection marker`,m.injected_patches?'injection-alert':'quiet'),el('p',`Gateway: optimization ${m.optimization_calls}/${m.successful_calls} calls · redaction ${m.redacted_calls}`,'quiet'));}
   else card.append(el('p',c.status==='running'?'Repairing carriers and collecting receipts…':c.status==='queued'?'Starts automatically in sequence.':'No completed result.','quiet'));
   if(c.run_id){const b=button(c.run_id===run?.id?'Viewing this case':'Inspect case',async()=>{try{const saved=await api('/api/runs/'+c.run_id);followingLive=false;run=saved;signature='';applyOrder();render();}catch(e){showError(e.message);}});b.disabled=c.run_id===run?.id;card.append(b);}
+  if(c.run_id&&(c.summary?.waiting||c.status==='complete'))card.append(button('Show contact handoff',async()=>{try{run=await api('/api/runs/'+c.run_id);followingLive=false;signature='';applyOrder();selected='harbor';render();($('contact-handoff')||$('details')).scrollIntoView({behavior:'smooth',block:'start'});}catch(e){showError(e.message);}}));
   $('cases').append(card);
  }
 }
 function renderDetails(){const c=config.carriers.find(c=>c.id===selected),s=run?.carriers[selected];if(!s)return;const pane=$('details');pane.replaceChildren(el('p','CARRIER / '+c.city.toUpperCase(),'eyebrow'),el('h2',c.name),el('p',c.description),el('span',labels[s.status]||s.status,'badge '+s.status));const dl=el('dl');for(const [k,v] of [['Contact',c.contact.name],['Email',c.contact.email],['Phone',c.contact.phone]])dl.append(el('dt',k),el('dd',v));pane.append(dl,el('p','Fictional company and reserved demo contacts.','quiet'),link('Read API documentation ↗',c.documentation_url+`?attack=${run.attack?1:0}`));if(s.trace_url)pane.append(el('br'),link('Open Logfire trace ↗',s.trace_url));
- if(s.incident_id){const box=el('div',null,'contact-box');box.append(el('strong',s.incident_id),el('p','Contact stub — no call placed. Your teammate can return new context to this incident.'),link('Inspect contact handoff ↗','/api/incidents/'+s.incident_id));if(s.status==='waiting_contact'&&c.id==='harbor')box.append(el('p',''),button('Simulate carrier reply',async()=>{try{await api(`/api/incidents/${s.incident_id}/simulate-reply`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});await refreshRun();}catch(e){showError(e.message);}}));pane.append(box);}
+ if(s.incident_id){
+  const box=el('section',null,'contact-box');box.id='contact-handoff';
+  const replies=run.events.filter(e=>e.carrier_id===selected&&e.kind==='contact_context_received');
+  box.append(el('p','CONTACT HANDOFF','eyebrow'),el('h3',replies.length?'Carrier reply received':'Waiting for the carrier'),el('p',s.incident_id,'incident-reference'));
+  box.append(el('p',`${c.contact.name} · ${c.contact.email}`),el('p',replies.length?'The carrier supplied new API contract and agreement details for this incident.':'The automatic repair needs the current API contract and agreement details. The reply stays attached to this incident.'));
+  if(replies.length){
+   for(const reply of replies){const message=el('div',null,'carrier-reply');message.append(el('strong',reply.data.source==='simulated-carrier-representative'?'Simulated carrier reply':'Carrier reply'),el('p',new Date(reply.at).toLocaleString(),'quiet'),el('pre',reply.data.context));box.append(message);}
+   box.append(el('p',s.status==='restored'?'Reply → new patch → Modal checks passed → quote restored.':s.status==='resuming'?'The fixer is using this reply to propose and test a new patch in Modal.':`Repair status: ${labels[s.status]||s.status}.`,'contact-outcome'));
+   const flowLink=el('a','View the repair flow ↑');flowLink.href='#repair-flow';box.append(flowLink,el('br'));
+  }
+  if(s.status==='waiting_contact'&&c.id==='harbor'){
+   box.append(el('p','Demo action: deliver a simulated carrier reply. No real call or email is placed.','quiet'));
+   box.append(button('Simulate carrier reply & resume',async event=>{const b=event.currentTarget;b.disabled=true;b.textContent='Delivering reply…';try{await api(`/api/incidents/${s.incident_id}/simulate-reply`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});await refreshRun();}catch(e){showError(e.message);}finally{b.disabled=false;b.textContent='Simulate carrier reply & resume';}}));
+  }
+  box.append(el('p',''),link('Inspect incident record ↗','/api/incidents/'+s.incident_id));pane.append(box);
+ }
  if(s.error){const d=el('details');d.append(el('summary','Current error'),el('pre',s.error,'raw'));pane.append(d);}
  for(const a of [...s.attempts].reverse()){const card=el('section',null,'attempt');card.append(el('strong',`Patch ${a.number} · ${a.phase}`),el('p',a.hypothesis),el('span',a.status.replaceAll('_',' '),'badge '+a.status));if(a.source.includes('DEMO_CUSTOMER_SECRET_'))card.append(el('p','Injection evidence: this patch contains the synthetic customer-secret marker from the poisoned document.','injection-alert'));if(a.validation){card.append(el('p',`Modal ${a.validation.sandbox_id}`,'quiet'));for(const c of a.validation.checks)card.append(el('div',`${c.passed?'PASS':'FAIL'} · ${c.case}${c.error?' · '+c.error:''}`,'check '+(c.passed?'pass':'fail')));}for(const [title,value] of [['Source diff',a.diff],['Complete candidate',a.source],['Evidence',a.evidence?.join('\n')]]){const d=el('details');d.append(el('summary',title),el('pre',value||'None supplied'));card.append(d);}pane.append(card);}
 }
