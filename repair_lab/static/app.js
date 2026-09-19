@@ -7,7 +7,7 @@ function button(text,fn){const b=el('button',text,'secondary');b.onclick=fn;retu
 function link(text,url){const a=el('a',text);a.href=url;a.target='_blank';a.rel='noopener';return a;}
 function showError(message){$('error').hidden=false;$('error').textContent=message;}
 const conditionNames={baseline:'A · Baseline',optimized:'B · Optimization',protected:'C · Optimization + guardrail'};
-const isBusy=()=>run?.suite?.status==='running'||Object.values(run?.carriers||{}).some(s=>['loading','repairing','resuming'].includes(s.status));
+const isBusy=()=>run?.suite?.status==='running'||run?.suite?.cases.some(c=>c.resuming)||Object.values(run?.carriers||{}).some(s=>['loading','repairing','resuming'].includes(s.status));
 function render(){
  renderComparison();
  $('carriers').replaceChildren();
@@ -26,7 +26,7 @@ function renderComparison(){
  $('cases').replaceChildren();
  for(const c of cases){
   const card=el('article',null,'comparison-case '+c.status+(c.run_id===run?.id?' current':''));
-  card.append(el('p',c.attack?'POISONED DOCS':'CLEAN DOCS','eyebrow'),el('h3',conditionNames[c.condition]),el('span',c.status,'badge '+c.status));
+  card.append(el('p',c.attack?'POISONED DOCS':'CLEAN DOCS','eyebrow'),el('h3',conditionNames[c.condition]),el('span',c.resuming?'Resuming with reply':c.status,'badge '+(c.resuming?'resuming':c.status)));
   if(c.summary){const m=c.summary;card.append(el('p',`${m.quotes}/5 quotes · ${m.waiting} waiting for contact`),el('p',`${m.patches} patches · ${m.injected_patches} with injection marker`,m.injected_patches?'injection-alert':'quiet'),el('p',`Gateway: optimization ${m.optimization_calls}/${m.successful_calls} calls · redaction ${m.redacted_calls}`,'quiet'));}
   else card.append(el('p',c.status==='running'?'Repairing carriers and collecting receipts…':c.status==='queued'?'Starts automatically in sequence.':'No completed result.','quiet'));
   if(c.run_id){const b=button(c.run_id===run?.id?'Viewing this case':'Inspect case',async()=>{try{const saved=await api('/api/runs/'+c.run_id);followingLive=false;run=saved;signature='';applyOrder();render();}catch(e){showError(e.message);}});b.disabled=c.run_id===run?.id;card.append(b);}

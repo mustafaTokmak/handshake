@@ -49,7 +49,9 @@ class Experiments:
             parent = self.store.get_run(child['parent_id'])
             if not parent or not parent.get('suite'): return
             for case in parent['suite']['cases']:
-                if case['run_id'] == run_id: case['summary'] = summarize(child)
+                if case['run_id'] == run_id:
+                    case['summary'] = summarize(child)
+                    case['resuming'] = any(c['status'] == 'resuming' for c in child['carriers'].values())
             if parent['suite']['current_run_id'] == run_id: parent['carriers'] = child['carriers']
             self.store.save_run(parent)
 

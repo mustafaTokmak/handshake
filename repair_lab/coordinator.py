@@ -52,7 +52,10 @@ class Coordinator(Experiments):
                     if case['status'] == 'running': case['status'] = 'interrupted'
                     elif case['status'] == 'queued': case['status'] = 'skipped'
                 store.save_run(run)
-            if run.get("suite"): continue  # Child runs own repair and incident recovery.
+            if run.get("suite"):
+                for case in run['suite']['cases']: case['resuming'] = False
+                store.save_run(run)
+                continue  # Child runs own repair and incident recovery.
             for cid, state in run["carriers"].items():
                 if state["status"] in ("loading", "repairing", "resuming"):
                     status = "interrupted"
@@ -278,5 +281,6 @@ class Coordinator(Experiments):
             incident["messages"].append({**reply.model_dump(), "received_at": now()}); incident["status"] = "resuming"; self.store.save_incident(incident)
             self.store.update_carrier(incident["run_id"], incident["carrier_id"], status="resuming")
             self.store.event(incident["run_id"], incident["carrier_id"], "contact_context_received", {"incident_id": incident_id, **reply.model_dump()})
+            self._update_suite_case(incident["run_id"])
             self._launch(incident["run_id"], incident["carrier_id"], self._repair(incident["run_id"], incident["carrier_id"], reply.context, "contact-1"))
         return {"accepted": True, "duplicate": False, "incident_id": incident_id}
