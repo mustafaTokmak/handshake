@@ -69,6 +69,13 @@ class SharedDemo(unittest.TestCase):
         self.request('POST', '/api/sessions', {})
         self.assertEqual(self.request('POST', '/api/sessions/'+first['id']+'/start', {})[0], 400)
 
+    def test_caller_can_list_each_comparison_child_without_cluttering_history(self):
+        _, parent = self.request('POST', '/api/sessions', {})
+        child = self.server.coordinator._start(StartRequest(), ready=True, parent_id=parent['id'])
+        self.assertEqual(len(self.request('GET', '/api/runs')[1]), 1)
+        runs = self.request('GET', '/api/runs?include_children=1')[1]
+        self.assertEqual({r['id'] for r in runs}, {parent['id'], child['id']})
+
     def test_public_docs_and_origin_boundary(self):
         config = self.request('GET', '/api/config')[1]
         for carrier in config['carriers']:

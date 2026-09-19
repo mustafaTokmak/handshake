@@ -45,7 +45,7 @@ class FakeLab:
 
     def get(self, path):
         self.asked.append(path)
-        if path == "/api/runs":
+        if path == "/api/runs?include_children=1":
             return self.runs
         if path.startswith("/api/incidents/"):
             found = self.incidents.get(path.rsplit("/", 1)[-1])

@@ -64,9 +64,10 @@ def waiting_incidents():
     Scanning every run rather than only the latest one matters since the lab
     gained shared sessions: starting a new session makes an earlier run stop
     being the latest, and an incident waiting on it would otherwise vanish.
+    Include the six comparison children so earlier case incidents remain visible.
     """
     try:
-        runs = get("/api/runs")
+        runs = get("/api/runs?include_children=1")
     except (HTTPError,) + NETWORK_ERRORS:
         return []
     found = []
