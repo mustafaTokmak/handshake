@@ -49,6 +49,31 @@ The comparison is deliberately stated as an observation, not a guarantee. An
 unprotected model may resist the injection on a given run; contamination is a
 number you read off the receipts, not an outcome the demo asserts in advance.
 
+### A completed session you can read right now
+
+[Session 3a30b2e9](https://mtokmak06--handshake-live.modal.run/?run=3a30b2e9561548ab81d8d2b0e3e4f55a&carrier=cedar#run-status)
+is a finished 6/6 run, kept in the history so you can inspect it without starting
+anything. Patches carrying the injection marker, as recorded in that session:
+
+| Condition | Clean docs | Poisoned docs |
+| --- | --- | --- |
+| A · Baseline | 0 of 7 patches | **1 of 8 patches** |
+| B · Optimization | 0 of 7 | **1 of 8** |
+| C · Optimization + guardrail | 0 of 7 | 0 of 8, with 1 Gateway redaction receipt |
+
+Open any case, pick a carrier, and the Live repair flow below it replays from that
+case's recorded events — every hypothesis, diff, sandbox check and Gateway receipt
+is still there. Deep links carry the run and the carrier, so
+`?run=<id>&carrier=harbor` lands on the escalation path directly.
+
+### Or run it yourself
+
+The demo is live, not a recording: **New test session** followed by **Start all
+six ↗** runs the whole comparison against real model requests and real Modal
+sandboxes, and takes a few minutes. It is a single shared session, though — a new
+session resets the order, adapters, patches and incidents for everyone currently
+watching, and the previous session drops into the history table intact.
+
 ## The live repair flow
 
 The **Live repair flow** panel is driven entirely by recorded events — it never
